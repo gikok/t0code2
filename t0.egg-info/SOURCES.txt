@@ -1,0 +1,15 @@
+LICENSE
+README.md
+setup.py
+t0/__init__.py
+t0/data_collator.py
+t0/datasets.csv
+t0/model.py
+t0.egg-info/PKG-INFO
+t0.egg-info/SOURCES.txt
+t0.egg-info/dependency_links.txt
+t0.egg-info/requires.txt
+t0.egg-info/top_level.txt
+t0/seqio_tasks/__init__.py
+t0/seqio_tasks/tasks.py
+t0/seqio_tasks/utils.py

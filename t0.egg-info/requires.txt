@@ -1,0 +1,15 @@
+promptsource==0.1.0
+accelerate
+transformers
+torch
+datasets
+jinja2
+datasets
+sentencepiece
+protobuf
+scikit-learn
+
+[seqio_tasks]
+seqio
+t5
+tensorflow
