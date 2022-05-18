@@ -1,4 +1,4 @@
-python single_task_fine_tune_csv.py \
+python single_task_fine_tune.py \
     --dataset_name "super_glue" \
     --dataset_config_name "wic" \
     --template_name "grammar_homework" \
