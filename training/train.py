@@ -23,13 +23,15 @@ https://github.com/huggingface/transformers/blob/master/examples/pytorch/summari
 """
 
 import argparse
+from lib2to3.pgen2 import token
 import logging
 import os
 import random
 from dataclasses import dataclass
 from itertools import chain
 from typing import Optional, Union
-import csv
+import pandas as pd
+import numpy as np
 import math
 
 import datasets
@@ -70,21 +72,6 @@ def parse_args():
         default=None,
         required=True,
         help="The name of the dataset to use (via the datasets library).",
-    )
-    parser.add_argument(
-        "-s",
-        "--dataset_config_name",
-        type=str,
-        default=None,
-        help="The configuration name (usually a subset) of the dataset to use (via the datasets library).",
-    )
-    parser.add_argument(
-        "-t",
-        "--template_name",
-        type=str,
-        default=None,
-        required=True,
-        help="The template/prompt name in `promptsource`.",
     )
     parser.add_argument(
         "-o",
@@ -132,7 +119,7 @@ def parse_args():
         "--num_shots",
         type=int,
         default=None,
-        help="Number of training examples for few-shot learning. Default is None, which uses the entire train set.",
+        help="Number of training training for few-shot learning. Default is None, which uses the entire train set.",
     )
     parser.add_argument(
         "-lr",
@@ -202,13 +189,6 @@ def parse_args():
         type=int,
         default=42,
         help="Especially important for few-shot example sampling.",
-    )
-    parser.add_argument(
-        "-cf",
-        "--config_name",
-        type=str,
-        default=None,
-        help="Pretrained config name or path if not the same as model_name",
     )
     parser.add_argument(
         "-tk",
@@ -383,20 +363,19 @@ def main():
     # In distributed evaluation, the load_dataset function guarantee that only one local process can concurrently
     # download the dataset.
     if args.dataset_name is not None:
-        data_files = {"train": "year_data.csv", "test": "validation.csv"}
+        data_files = {"train": args.dataset_name, "test": args.dataset_name}
         raw_train_dataset = load_dataset(
-            "data_test", data_files=data_files, split="train"
+            "data", data_files=data_files, split="train"
         )
         raw_eval_dataset = load_dataset(
-            "data_test", data_files=data_files, split="test"
+            "data", data_files=data_files, split="test"
         )
     else:
         raise ValueError(
-            "Please specify `args.dataset_name` and `args.dataset_config_name` as appear in `promptsource`."
+            "Please specify `args.dataset_name`."
         )
-    # TODO(Victor): enable loading pre-processed dataset from https://huggingface.co/datasets/bigscience/P3
 
-    # Trim a number of evaluation examples
+    # Trim a number of evaluation training
     if args.debug:
         raw_train_dataset = raw_train_dataset.select(
             range(min(100, len(raw_train_dataset)))
@@ -408,83 +387,24 @@ def main():
     column_names = raw_eval_dataset.column_names
 
     # Load pretrained model and tokenizer
-    #
-    # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
-    # download model & vocab.
-    if args.config_name:
-        config = AutoConfig.from_pretrained(args.config_name)
-    elif args.model_name_or_path:
-        config = AutoConfig.from_pretrained(args.model_name_or_path)
-    else:
-        raise ValueError(
-            "Either `args.config_name` or `args.model_name_or_path` should be provided."
-        )
 
-    if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(
-            args.tokenizer_name, use_fast=not args.use_slow_tokenizer
-        )
-    elif args.model_name_or_path:
-        tokenizer = AutoTokenizer.from_pretrained(
-            args.model_name_or_path, use_fast=not args.use_slow_tokenizer
-        )
-    else:
-        raise ValueError(
-            "You are instantiating a new tokenizer from scratch. This is not supported by this script."
-            "You can do it from another script, save it, and load it from here, using --tokenizer_name."
-        )
+    model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
-    if args.model_name_or_path:
-        model = AutoModelForSeq2SeqLM.from_pretrained(
-            args.model_name_or_path,
-            from_tf=bool(".ckpt" in args.model_name_or_path),
-            config=config,
-        )
-    else:
-        logger.info("Training new model from scratch")
-        model = AutoModelForSeq2SeqLM.from_config(config)
+    # get all item_no and add as tokens
+    items = pd.read_parquet('../data/item_no_6k.gzip')['item_no'].values.tolist()
+    tokenizer.add_tokens(items)
+
+    # then resize embeddings
+    model.resize_token_embeddings(len(tokenizer))
 
     # Preprocessing the datasets.
     # First we tokenize all the texts.
     padding = "max_length" if args.pad_to_max_length else False
 
-    # Get the prompt to apply and the possible targets.
-    # TODO(Victor): If pulling from pre-processed data, remove this logic.
-
-    def preprocess_train(examples):
-        bs = len(examples[column_names[0]])
-        r = int(bs / 100)
-        l = 1
-        input_texts = []
-        target_texts = []
-        # l for mixing how many of the results to be used
-        for i in range(bs):
-            if i % r == 0:
-                l += 1
-                if l > 10:
-                    l = 1
-            # clean data (remove trailing product id and replace line break with comma to make list)
-            ex = (
-                examples[column_names[1]][i]
-                .strip("][")
-                .replace("'", "")
-                .split("\n")[:l]
-            )
-            ex = [text.rsplit(" ", 1)[0] for text in ex]
-
-            # remove product ids that weren't droppped
-            ex = [
-                item[0]
-                for item in [
-                    "".join([i.lower() for i in exx if not i.isdigit()]).split("  ")
-                    for exx in ex
-                ]
-            ][:l]
-            ex = [str(r + 1) + ". " + i for r, i in enumerate(ex)]
-            input = f"query is: {examples[column_names[0]][i]}. what are the top {len(ex)} results?"
-            target = ", ".join(ex)
-            input_texts.append(input)
-            target_texts.append(target)
+    def tokenize_train(examples):
+        input_texts = examples['input']
+        target_texts = examples['target']
 
         model_inputs = tokenizer(
             input_texts,
@@ -509,18 +429,9 @@ def main():
         return model_inputs
 
     def preprocess_eval(examples):
-        bs = len(examples[column_names[0]])
-
-        input_texts = []
-        target_texts = []
-        answer_choices_texts = []
-        for i in range(bs):
-            ex = examples[column_names[1]][i].strip("][").split(",")[:10]
-            input = f"Query is: {examples[column_names[0]][i].lower()}. What are the top 10 results?"
-            target = " ".join(ex)
-            input_texts.append(input)
-            target_texts.append(target)
-            answer_choices_texts.append(ex)
+        input_texts = examples['input']
+        target_texts = examples['target']
+        answer_choices_texts = examples['options']
 
         tokenized_inputs = tokenizer(
             input_texts,
@@ -551,10 +462,10 @@ def main():
         features["labels_attention_mask"] = [
             tokenized_targets[idx]["attention_mask"] for idx in range(bs)
         ]
-        # features["targets"] = [
-        #     answer_choices_texts[idx].index(t)
-        #     for idx, t in enumerate(target_texts)
-        # ]
+        features["targets"] = [
+            answer_choices_texts[idx].index(t)
+            for idx, t in enumerate(target_texts)
+        ]
 
         return features
 
@@ -569,10 +480,10 @@ def main():
             )
             raw_train_dataset = raw_train_dataset.select(sample_indices)
         train_dataset = raw_train_dataset.map(
-            preprocess_train, batched=True, remove_columns=column_names
+            tokenize_train, batched=True, remove_columns=column_names
         )
 
-    # Log a few random examples:
+    # Log a few random training:
     for index in random.sample(range(len(train_dataset)), 3):
         logger.debug(f"Sample {index} of the training set: {train_dataset[index]}.")
     for index in random.sample(range(len(eval_dataset)), 3):
@@ -671,7 +582,7 @@ def main():
         * args.gradient_accumulation_steps
     )
     logger.info("***** Running training *****")
-    logger.info(f"  Num examples = {len(train_dataset)}")
+    logger.info(f"  Num training = {len(train_dataset)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
     logger.info(
         f"  Instantaneous batch size per device = {args.per_device_train_batch_size}"
@@ -716,6 +627,7 @@ def main():
     r = int(args.max_train_steps / 10)
     if args.gradient_checkpoint:
         model.gradient_checkpointing_enable()
+    model_counter = 0
     for epoch in range(1, args.num_train_epochs + 1):
         model.train()
         for step, batch in enumerate(train_dataloader):
@@ -751,16 +663,19 @@ def main():
 
             # save model checkpoint ever r steps
             if global_steps % r == 0:
+                model_counter += 1
+                mc = str(model_counter).zfill(3)
                 print("SAVING INTERMEDIATE MODEL")
-                model.save_pretrained(args.output_dir)
-                tokenizer.save_pretrained(args.output_dir)
+                os.mkdir(args.output_dir+f'_'+mc)
+                model.save_pretrained(args.output_dir+f'_'+mc)
+                tokenizer.save_pretrained(args.output_dir+f'_'+mc)
             if global_steps >= args.max_train_steps:
                 break
 
         # Evaluate every epoch
         total_batch_size = args.per_device_eval_batch_size * accelerator.num_processes
         logger.info("***** Running evaluation *****")
-        logger.info(f"  Num examples = {len(eval_dataset)}")
+        logger.info(f"  Num training = {len(eval_dataset)}")
         logger.info(
             f"  Instantaneous batch size per device = {args.per_device_eval_batch_size}"
         )
@@ -784,7 +699,7 @@ def main():
     #         masked_log_probs = batch["labels_attention_mask"].unsqueeze(-1) * torch.log_softmax(logits, dim=-1)
     #         seq_token_log_probs = torch.gather(masked_log_probs, -1, batch["labels"].unsqueeze(-1))
     #         seq_log_prob = seq_token_log_probs.squeeze(dim=-1).sum(dim=-1)
-    #         seq_log_prob = seq_log_prob.view(batch["targets"].size(0), -1) #TODO(Victor): this reshapes works based on the assumption that all examples have the same number of choices. the pre-processing doesn't make this assumption.
+    #         seq_log_prob = seq_log_prob.view(batch["targets"].size(0), -1) #TODO(Victor): this reshapes works based on the assumption that all training have the same number of choices. the pre-processing doesn't make this assumption.
     #         predictions = seq_log_prob.argmax(dim=-1)
 
     #         metric.add_batch(
@@ -809,8 +724,9 @@ def main():
     #     if args.wandb_proj and accelerator.is_main_process:
     #         wandb.log({"accuracy": score}, step=global_steps)
     # # End training loop
-    model.save_pretrained("/home/trained_model")
-    tokenizer.save_pretrained("/home/trained_model")
+    os.mkdir(args.output_dir+'/final_model/')
+    model.save_pretrained(args.output_dir+'/final_model/')
+    tokenizer.save_pretrained(args.output_dir+'/final_model/')
 
     # if accelerator.is_main_process:
     #     if args.output_dir is not None:
@@ -821,6 +737,184 @@ def main():
 
     # if args.wandb_proj:
     #     wandb.finish()
+
+
+
+
+
+
+def add_or(s):
+    li = s.rsplit(', ')
+    start = ', '.join(li[:-1])
+    end =  ' or ' + li[-1]
+    return start+end
+    
+
+def create_option_string(df, column, inds):
+    options = ""
+    for i in inds:
+        options +=  f"'{df[column].iloc[i]}', "
+        if i == inds[-1]:
+            options = options[:-2]
+    options = add_or(options)
+        
+    return options
+
+def get_other_indices(index, size, num):
+    """
+    given a number {index}, returns {num} integers in range({size})
+    """
+    
+    proceed = 0
+    while proceed == 0:
+        inds = np.random.choice(range(size), num)
+        # check if any of the new indices is same as initial
+        if (inds == index).any()==False:
+            proceed = 1
+        else:
+            proceed = 0
+    
+    return inds
+
+
+def no_to_name(index):
+    
+    # get random number of options
+    num = np.random.randint(1, 4)
+    
+    # get random item index
+    inds = get_other_indices(index, len(df), num)
+    inds = np.append(inds, index)
+    np.random.shuffle(inds)
+    
+    # get answer options
+    options = create_option_string(df, 'name', inds)
+    
+    # create the input string
+    inp = f"if item_no is {df['item_no'].iloc[index]}, which of the following is the correct name: " + options + '?'
+    
+    
+    # set the target
+    target = df['name'].iloc[inds[np.argmin(inds-index)]]
+    
+    return inp.lower(), target.lower()
+
+def name_to_no(index):
+    
+    # get random number of options
+    num = np.random.randint(1, 4)
+    
+    # get random item index
+    inds = get_other_indices(index, len(df), num)
+    inds = np.append(inds, index)
+    np.random.shuffle(inds)
+    
+    # get answer options
+    options = create_option_string(df, 'item_no', inds)
+    
+    # get the input string
+    inp = f"if name is {df['name'].iloc[index]}, what item_no does it refer to? " + options + '?' 
+    
+    # get the target
+    target = df['item_no'].iloc[inds[np.argmin(inds-index)]]
+    
+    return inp.lower(), target.lower()
+
+def is_description(index):
+    
+    is_true = np.random.randint(2)
+    
+    if is_true:
+        desc = df['benefits'].iloc[index]
+        target = "yes"
+    else:
+        tempdf = df[df['benefits']!=df['benefits'].iloc[index]]
+        desc = np.random.choice(tempdf['benefits'])
+        target = "no"
+        
+    # make sure ends with period    
+    desc = desc if desc.endswith(".") else desc + "."
+    
+    # create input
+    inp = desc + f" is the previous sentence a description of item_no {df['item_no'].iloc[index]}. yes or no?"
+    
+    return inp.lower(), target
+
+def is_summary(index):
+    
+    is_true = np.random.randint(2)
+    
+    if is_true:
+        desc = df['key_w'].iloc[index]
+        target = "yes"
+    else:
+        tempdf = df[df['key_w']!=df['key_w'].iloc[index]]
+        desc = np.random.choice(tempdf['key_w'])
+        target = "no"
+        
+    # make sure ends with period    
+    desc = desc if desc.endswith(".") else desc + "."
+    
+    # create input
+    inp = desc + f" is the previous sentence a summary of item_no {df['item_no'].iloc[index]}. yes or no?"
+    
+    return inp.lower(), target
+
+def true_query(query_df, item_no):
+    
+    is_true = np.random.randint(2)
+    
+    if is_true:
+        query = query_df['clean_query'].sample().iloc[0]
+        target = "yes"
+    else:
+        query = query_df['clean_query'].sample().iloc[0]
+        target = "no"
+
+    
+    # create input
+    inp = "query:'" + query + f"'\ndoes the query above return item_no {item_no} as a result. yes or no?"
+    
+    return inp.lower(), target
+
+def query_rank(query_df, item_no):
+
+    # select random row
+    row = query_df.sample()
+    
+    # get query string
+    query = row['clean_query'].iloc[0]
+    
+    # get rank of item_no
+    cols = np.array(row.columns)
+    inds = (row[row==item_no].isnull()==False).values[0]
+    
+    # get first true value, that is not 0 (queries can be for item_no) and
+    # sometimes same item_no has multiple ranks
+    if len(inds)>1:
+        inds[0] = False
+        rank = cols[np.argmax(inds)][-1]
+    
+    # in case rank is 10
+    rank = '10' if rank=='0' else rank
+    
+    # create possible options
+    n_options = np.random.randint(1, 5)
+    
+    options = list(np.arange(1, 11))
+    options.remove(int(rank))
+    
+    options = np.append(np.random.choice(options, n_options).astype(str), rank)
+    np.random.shuffle(options)
+    
+    # create input
+    inp = "query:'" + query + f"'\nthe query above returns item_no {item_no} as a result. what is its rank? " + add_or(', '.join(options))
+    
+    target = rank
+    
+    return inp.lower(), rank
+
+
 
 
 if __name__ == "__main__":

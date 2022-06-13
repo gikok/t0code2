@@ -18,7 +18,7 @@ While the codebase in this repository mainly reproduces and replicates the train
 - [Training](training/README.md): reproducing (or replicating) the massively multitask fine-tuning
 - [Evaluation](evaluation/README.md): reproducing the main results reported in the paper
 - [Inference](inference/README.md): running inference with T0
-- [Examples](examples/README.md): fine-tuning T0 with additional datasets or prompts.
+- [Examples](training/README.md): fine-tuning T0 with additional datasets or prompts.
 
 ## Released checkpoints
 
