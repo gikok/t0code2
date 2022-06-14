@@ -43,7 +43,6 @@ from tqdm.auto import tqdm
 import transformers
 from accelerate import Accelerator
 from transformers import (
-    AutoConfig,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
     PreTrainedTokenizerBase,
@@ -55,7 +54,6 @@ from transformers import (
     set_seed,
 )
 from transformers.file_utils import PaddingStrategy
-from promptsource.templates import DatasetTemplates
 
 
 logger = logging.getLogger(__name__)
@@ -146,7 +144,7 @@ def parse_args():
         "--gradient_checkpoint",
         action="store_true",
         help="If enabled model will train with gradient checkpointing, reducing GPU memory usage",
-    )    
+    )
     parser.add_argument(
         "-ms",
         "--max_train_steps",
@@ -364,16 +362,10 @@ def main():
     # download the dataset.
     if args.dataset_name is not None:
         data_files = {"train": args.dataset_name, "test": args.dataset_name}
-        raw_train_dataset = load_dataset(
-            "data", data_files=data_files, split="train"
-        )
-        raw_eval_dataset = load_dataset(
-            "data", data_files=data_files, split="test"
-        )
+        raw_train_dataset = load_dataset("data", data_files=data_files, split="train")
+        raw_eval_dataset = load_dataset("data", data_files=data_files, split="test")
     else:
-        raise ValueError(
-            "Please specify `args.dataset_name`."
-        )
+        raise ValueError("Please specify `args.dataset_name`.")
 
     # Trim a number of evaluation training
     if args.debug:
@@ -392,7 +384,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
     # get all item_no and add as tokens
-    items = pd.read_parquet('../data/item_no_6k.gzip')['item_no'].values.tolist()
+    items = pd.read_parquet("data/item_no_6k.parquet.gzip")["item_no"].values.tolist()
     tokenizer.add_tokens(items)
 
     # then resize embeddings
@@ -403,8 +395,8 @@ def main():
     padding = "max_length" if args.pad_to_max_length else False
 
     def tokenize_train(examples):
-        input_texts = examples['input']
-        target_texts = examples['target']
+        input_texts = examples["input"]
+        target_texts = examples["target"]
 
         model_inputs = tokenizer(
             input_texts,
@@ -429,9 +421,9 @@ def main():
         return model_inputs
 
     def preprocess_eval(examples):
-        input_texts = examples['input']
-        target_texts = examples['target']
-        answer_choices_texts = examples['options']
+        input_texts = examples["input"]
+        target_texts = examples["target"]
+        answer_choices_texts = examples["options"]
 
         tokenized_inputs = tokenizer(
             input_texts,
@@ -463,8 +455,7 @@ def main():
             tokenized_targets[idx]["attention_mask"] for idx in range(bs)
         ]
         features["targets"] = [
-            answer_choices_texts[idx].index(t)
-            for idx, t in enumerate(target_texts)
+            answer_choices_texts[idx].index(t) for idx, t in enumerate(target_texts)
         ]
 
         return features
@@ -622,9 +613,9 @@ def main():
         for name, param in model.named_parameters():
             if name.startswith("encoder"):
                 param.requires_grad = False
-    
+
     # how often trained model should be saved
-    r = int(args.max_train_steps / 10)
+    r = int(args.max_train_steps / 30)
     if args.gradient_checkpoint:
         model.gradient_checkpointing_enable()
     model_counter = 0
@@ -649,26 +640,38 @@ def main():
                     tqdm.write(f"epoch = {epoch}, step = {global_steps}, loss = {loss}")
                 if args.wandb_proj and accelerator.is_main_process:
                     wandb.log({"loss": loss}, step=global_steps)
-                    
+
                     # log inference every 10 steps
                     if global_steps % 10 == 0:
-                        inp = ["what is a cow?", "query is: steel fork for babies. what are the top 3 results?"]
-                        inputs = tokenizer.batch_encode_plus(inp, return_tensors='pt', padding=True)
+                        inp = [
+                            "what is a cow?",
+                            "query is: steel fork for babies. what are the top 3 results?",
+                        ]
+                        inputs = tokenizer.batch_encode_plus(
+                            inp, return_tensors="pt", padding=True
+                        )
                         inputs = inputs.to("cuda:0")
                         with torch.no_grad():
-                            outputs = model.generate(inputs['input_ids'])
-                            result = [tokenizer.decode(outputs[0], skip_special_tokens=True), tokenizer.decode(outputs[1], skip_special_tokens=True)]
-                            wandb.log({'standard inference': result[0]}, step=global_steps)
-                            wandb.log({'trained inference': result[1]}, step=global_steps)
+                            outputs = model.generate(inputs["input_ids"])
+                            result = [
+                                tokenizer.decode(outputs[0], skip_special_tokens=True),
+                                tokenizer.decode(outputs[1], skip_special_tokens=True),
+                            ]
+                            wandb.log(
+                                {"standard inference": result[0]}, step=global_steps
+                            )
+                            wandb.log(
+                                {"trained inference": result[1]}, step=global_steps
+                            )
 
             # save model checkpoint ever r steps
             if global_steps % r == 0:
                 model_counter += 1
                 mc = str(model_counter).zfill(3)
                 print("SAVING INTERMEDIATE MODEL")
-                os.mkdir(args.output_dir+f'_'+mc)
-                model.save_pretrained(args.output_dir+f'_'+mc)
-                tokenizer.save_pretrained(args.output_dir+f'_'+mc)
+                os.mkdir(args.output_dir + f"_" + mc)
+                model.save_pretrained(args.output_dir + f"_" + mc)
+                tokenizer.save_pretrained(args.output_dir + f"_" + mc)
             if global_steps >= args.max_train_steps:
                 break
 
@@ -724,9 +727,9 @@ def main():
     #     if args.wandb_proj and accelerator.is_main_process:
     #         wandb.log({"accuracy": score}, step=global_steps)
     # # End training loop
-    os.mkdir(args.output_dir+'/final_model/')
-    model.save_pretrained(args.output_dir+'/final_model/')
-    tokenizer.save_pretrained(args.output_dir+'/final_model/')
+    os.mkdir(args.output_dir + "/final_model/")
+    model.save_pretrained(args.output_dir + "/final_model/")
+    tokenizer.save_pretrained(args.output_dir + "/final_model/")
 
     # if accelerator.is_main_process:
     #     if args.output_dir is not None:
@@ -739,182 +742,203 @@ def main():
     #     wandb.finish()
 
 
-
-
-
-
 def add_or(s):
-    li = s.rsplit(', ')
-    start = ', '.join(li[:-1])
-    end =  ' or ' + li[-1]
-    return start+end
-    
+    li = s.rsplit(", ")
+    start = ", ".join(li[:-1])
+    end = " or " + li[-1]
+    return start + end
+
 
 def create_option_string(df, column, inds):
     options = ""
     for i in inds:
-        options +=  f"'{df[column].iloc[i]}', "
+        options += f"'{df[column].iloc[i]}', "
         if i == inds[-1]:
             options = options[:-2]
     options = add_or(options)
-        
+
     return options
+
 
 def get_other_indices(index, size, num):
     """
     given a number {index}, returns {num} integers in range({size})
     """
-    
+
     proceed = 0
     while proceed == 0:
         inds = np.random.choice(range(size), num)
         # check if any of the new indices is same as initial
-        if (inds == index).any()==False:
+        if (inds == index).any() == False:
             proceed = 1
         else:
             proceed = 0
-    
+
     return inds
 
 
 def no_to_name(index):
-    
+
     # get random number of options
     num = np.random.randint(1, 4)
-    
+
     # get random item index
     inds = get_other_indices(index, len(df), num)
     inds = np.append(inds, index)
     np.random.shuffle(inds)
-    
+
     # get answer options
-    options = create_option_string(df, 'name', inds)
-    
+    options = create_option_string(df, "name", inds)
+
     # create the input string
-    inp = f"if item_no is {df['item_no'].iloc[index]}, which of the following is the correct name: " + options + '?'
-    
-    
+    inp = (
+        f"if item_no is {df['item_no'].iloc[index]}, which of the following is the correct name: "
+        + options
+        + "?"
+    )
+
     # set the target
-    target = df['name'].iloc[inds[np.argmin(inds-index)]]
-    
+    target = df["name"].iloc[inds[np.argmin(inds - index)]]
+
     return inp.lower(), target.lower()
+
 
 def name_to_no(index):
-    
+
     # get random number of options
     num = np.random.randint(1, 4)
-    
+
     # get random item index
     inds = get_other_indices(index, len(df), num)
     inds = np.append(inds, index)
     np.random.shuffle(inds)
-    
+
     # get answer options
-    options = create_option_string(df, 'item_no', inds)
-    
+    options = create_option_string(df, "item_no", inds)
+
     # get the input string
-    inp = f"if name is {df['name'].iloc[index]}, what item_no does it refer to? " + options + '?' 
-    
+    inp = (
+        f"if name is {df['name'].iloc[index]}, what item_no does it refer to? "
+        + options
+        + "?"
+    )
+
     # get the target
-    target = df['item_no'].iloc[inds[np.argmin(inds-index)]]
-    
+    target = df["item_no"].iloc[inds[np.argmin(inds - index)]]
+
     return inp.lower(), target.lower()
 
+
 def is_description(index):
-    
+
     is_true = np.random.randint(2)
-    
+
     if is_true:
-        desc = df['benefits'].iloc[index]
+        desc = df["benefits"].iloc[index]
         target = "yes"
     else:
-        tempdf = df[df['benefits']!=df['benefits'].iloc[index]]
-        desc = np.random.choice(tempdf['benefits'])
+        tempdf = df[df["benefits"] != df["benefits"].iloc[index]]
+        desc = np.random.choice(tempdf["benefits"])
         target = "no"
-        
-    # make sure ends with period    
+
+    # make sure ends with period
     desc = desc if desc.endswith(".") else desc + "."
-    
+
     # create input
-    inp = desc + f" is the previous sentence a description of item_no {df['item_no'].iloc[index]}. yes or no?"
-    
+    inp = (
+        desc
+        + f" is the previous sentence a description of item_no {df['item_no'].iloc[index]}. yes or no?"
+    )
+
     return inp.lower(), target
+
 
 def is_summary(index):
-    
+
     is_true = np.random.randint(2)
-    
+
     if is_true:
-        desc = df['key_w'].iloc[index]
+        desc = df["key_w"].iloc[index]
         target = "yes"
     else:
-        tempdf = df[df['key_w']!=df['key_w'].iloc[index]]
-        desc = np.random.choice(tempdf['key_w'])
+        tempdf = df[df["key_w"] != df["key_w"].iloc[index]]
+        desc = np.random.choice(tempdf["key_w"])
         target = "no"
-        
-    # make sure ends with period    
+
+    # make sure ends with period
     desc = desc if desc.endswith(".") else desc + "."
-    
+
     # create input
-    inp = desc + f" is the previous sentence a summary of item_no {df['item_no'].iloc[index]}. yes or no?"
-    
+    inp = (
+        desc
+        + f" is the previous sentence a summary of item_no {df['item_no'].iloc[index]}. yes or no?"
+    )
+
     return inp.lower(), target
+
 
 def true_query(query_df, item_no):
-    
+
     is_true = np.random.randint(2)
-    
+
     if is_true:
-        query = query_df['clean_query'].sample().iloc[0]
+        query = query_df["clean_query"].sample().iloc[0]
         target = "yes"
     else:
-        query = query_df['clean_query'].sample().iloc[0]
+        query = query_df["clean_query"].sample().iloc[0]
         target = "no"
 
-    
     # create input
-    inp = "query:'" + query + f"'\ndoes the query above return item_no {item_no} as a result. yes or no?"
-    
+    inp = (
+        "query:'"
+        + query
+        + f"'\ndoes the query above return item_no {item_no} as a result. yes or no?"
+    )
+
     return inp.lower(), target
+
 
 def query_rank(query_df, item_no):
 
     # select random row
     row = query_df.sample()
-    
+
     # get query string
-    query = row['clean_query'].iloc[0]
-    
+    query = row["clean_query"].iloc[0]
+
     # get rank of item_no
     cols = np.array(row.columns)
-    inds = (row[row==item_no].isnull()==False).values[0]
-    
+    inds = (row[row == item_no].isnull() == False).values[0]
+
     # get first true value, that is not 0 (queries can be for item_no) and
     # sometimes same item_no has multiple ranks
-    if len(inds)>1:
+    if len(inds) > 1:
         inds[0] = False
         rank = cols[np.argmax(inds)][-1]
-    
+
     # in case rank is 10
-    rank = '10' if rank=='0' else rank
-    
+    rank = "10" if rank == "0" else rank
+
     # create possible options
     n_options = np.random.randint(1, 5)
-    
+
     options = list(np.arange(1, 11))
     options.remove(int(rank))
-    
+
     options = np.append(np.random.choice(options, n_options).astype(str), rank)
     np.random.shuffle(options)
-    
+
     # create input
-    inp = "query:'" + query + f"'\nthe query above returns item_no {item_no} as a result. what is its rank? " + add_or(', '.join(options))
-    
+    inp = (
+        "query:'"
+        + query
+        + f"'\nthe query above returns item_no {item_no} as a result. what is its rank? "
+        + add_or(", ".join(options))
+    )
+
     target = rank
-    
+
     return inp.lower(), rank
-
-
 
 
 if __name__ == "__main__":
