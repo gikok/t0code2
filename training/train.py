@@ -622,8 +622,8 @@ def main():
                 if name.startswith("encoder") or name.startswith("decoder"):
                     param.requires_grad = False
                 if name.startswith('shared') or name.startswith("lm_head"):
-                    grad_mask = torch.zeros(param.shape).to('cuda:0')
-                    grad_mask[-len(items):,:] = 1
+                    grad_mask = torch.ones_like(param)
+                    grad_mask[:len(items),:] = 0
                     param.register_hook(lambda grad: grad * grad_mask)
 
         for step, batch in enumerate(train_dataloader):
