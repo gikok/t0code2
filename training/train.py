@@ -571,7 +571,7 @@ def main():
 
     total_batch_size = (
         args.per_device_train_batch_size
-        * ( num_gpus / accelerator.num_processes )
+        * (accelerator.num_processes )
         * args.gradient_accumulation_steps
     )
     logger.info("***** Running training *****")
