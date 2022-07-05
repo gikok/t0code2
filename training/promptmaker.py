@@ -2,6 +2,47 @@ import pandas as pd
 import numpy as np
 import re
 
+def make_prompts():
+    np.random.seed(12)
+    queries = pd.read_hdf('year_queries.hdf5')
+    df = pd.read_hdf("filtered_GB_en_descriptions.hdf5")
+    functions = [no_to_name, name_to_no, is_description, is_summary, true_query, true_query, true_query, query_rank, query_rank]
+    prompt_df = pd.DataFrame({'global_index':[],'item_no':[], 'input':[], 'target':[], 'options':[]})
+    for i in range(len(df)):
+        start = time.time()
+        print('iteration: ', i)
+        index = i
+        item_no = df['item_no'].iloc[index]
+        query_df = queries[queries.isin([item_no]).any(axis=1)]
+        r = np.random.randint(0, 9, size=1024)
+        inputs = []
+        targets = []
+        options = []
+        for j in range(1024):
+            f = functions[r[j]]
+            
+            if r[j] <4:
+                inp, tar, opt = f(index)
+                inputs += [inp]
+                targets += [tar]
+                options += [opt]
+            
+            else:
+                inp, tar, opt = f(query_df, item_no)
+                inputs += [inp]
+                targets += [tar]
+                options += [opt]
+            
+        prompt_df = prompt_df.append(pd.DataFrame({'global_index':list(np.arange(1024*i, 1024*(i+1))),'item_no':1024*[item_no], 'input':inputs, 'target':targets, 'options':options}), ignore_index=True)
+        print(f"generating prompts for item_no {item_no} took {np.round(time.time()-start)} seconds.")
+        print("")
+        
+    prompt_df.to_hdf('prompts.hdf5', key='alpha')
+    prompt_df['insertion_time'] = dt.datetime.now()
+    prompt_df['options'] = prompt_df['options'].apply(lambda x: str(x))
+    prompt_df['global_index'] = prompt_df['global_index'].astype(int)
+    prompt_df.to_gbq(destination_table = 'prompts.prompts_001', project_id='ingka-search-modelling-dev', if_exists='append')
+
 def add_or(s):
     li = s.rsplit(', ')
     start = ', '.join(li[:-1])
