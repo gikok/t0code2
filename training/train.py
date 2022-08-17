@@ -362,8 +362,8 @@ def main():
     # download the dataset.
     if args.dataset_name is not None:
         data_files = {"train": args.dataset_name, "test": args.dataset_name}
-        raw_train_dataset = load_dataset("data", data_files=data_files, split="train")
-        raw_eval_dataset = load_dataset("data", data_files=data_files, split="test")
+        raw_train_dataset = load_dataset("data", data_files=data_files, split='train')
+        #raw_eval_dataset = load_dataset("data", data_files=data_files, split="test")
     else:
         raise ValueError("Please specify `args.dataset_name`.")
 
@@ -372,11 +372,10 @@ def main():
         raw_train_dataset = raw_train_dataset.select(
             range(min(100, len(raw_train_dataset)))
         )
-        raw_eval_dataset = raw_eval_dataset.select(
-            range(min(100, len(raw_eval_dataset)))
-        )
+        # raw_eval_dataset = raw_eval_dataset.select(
+        #     range(min(100, len(raw_eval_dataset)))
+        # )
 
-    column_names = raw_eval_dataset.column_names
 
     # Load pretrained model and tokenizer
 
@@ -461,9 +460,9 @@ def main():
         return features
 
     with accelerator.main_process_first():
-        eval_dataset = raw_eval_dataset.map(
-            preprocess_eval, batched=True, remove_columns=column_names
-        )
+        # eval_dataset = raw_eval_dataset.map(
+        #     preprocess_eval, batched=True
+        # )
 
         if args.num_shots is not None:
             sample_indices = random.sample(
@@ -471,14 +470,15 @@ def main():
             )
             raw_train_dataset = raw_train_dataset.select(sample_indices)
         train_dataset = raw_train_dataset.map(
-            tokenize_train, batched=True, remove_columns=column_names
+            tokenize_train, batched=True
         )
-
+        train_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'labels'])
+        train_dataset.save_to_disk('data/tokenized')
     # Log a few random training:
-    for index in random.sample(range(len(train_dataset)), 3):
-        logger.debug(f"Sample {index} of the training set: {train_dataset[index]}.")
-    for index in random.sample(range(len(eval_dataset)), 3):
-        logger.debug(f"Sample {index} of the evaluation set: {eval_dataset[index]}.")
+    # for index in random.sample(range(len(train_dataset)), 3):
+    #     logger.debug(f"Sample {index} of the training set: {train_dataset[index]}.")
+    # for index in random.sample(range(len(eval_dataset)), 3):
+    #     logger.debug(f"Sample {index} of the evaluation set: {eval_dataset[index]}.")
 
     # DataLoaders creation:
     train_collator = DataCollatorForSeq2Seq(
@@ -489,7 +489,7 @@ def main():
     )
     train_dataloader = DataLoader(
         train_dataset,
-        shuffle=True,
+        shuffle=False,
         collate_fn=train_collator,
         batch_size=args.per_device_train_batch_size,
     )
@@ -505,11 +505,11 @@ def main():
         eval_collator = DataCollatorForMultipleChoice(
             tokenizer, pad_to_multiple_of=(8 if accelerator.use_fp16 else None)
         )
-    eval_dataloader = DataLoader(
-        eval_dataset,
-        collate_fn=eval_collator,
-        batch_size=args.per_device_eval_batch_size,
-    )
+    # eval_dataloader = DataLoader(
+    #     eval_dataset,
+    #     collate_fn=eval_collator,
+    #     batch_size=args.per_device_eval_batch_size,
+    # )
 
     # Optimizer
     # Split weights in two groups, one with weight decay and the other not.
@@ -553,15 +553,17 @@ def main():
     )
 
     if args.parallelize:
+        print("PARALLEL LOL")
         num_gpus = torch.cuda.device_count()
         assert num_gpus > 1, "You need at least 2 GPUs to use `model.parallelize()`."
         model.parallelize()
-        optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
-            optimizer, train_dataloader, eval_dataloader
+        optimizer, train_dataloader = accelerator.prepare(
+            optimizer, train_dataloader
         )
     else:
-        model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
-            model, optimizer, train_dataloader, eval_dataloader
+        print("NOT PARALLEL LOL")
+        model, optimizer, train_dataloader  = accelerator.prepare(
+            model, optimizer, train_dataloader
         )
 
     # Metrics
@@ -569,7 +571,7 @@ def main():
 
     total_batch_size = (
         args.per_device_train_batch_size
-        * accelerator.num_processes
+        * (accelerator.num_processes )
         * args.gradient_accumulation_steps
     )
     logger.info("***** Running training *****")
@@ -608,19 +610,22 @@ def main():
             # reinit=True,  # uncomment if running multiple runs in one script
         )
 
-    # freeze encoder updates if specified
-    if args.freeze_encoder:
-        for name, param in model.named_parameters():
-            if name.startswith("encoder"):
-                param.requires_grad = False
-
     # how often trained model should be saved
-    r = int(args.max_train_steps / 30)
+    r = int(args.max_train_steps / 10)
     if args.gradient_checkpoint:
         model.gradient_checkpointing_enable()
     model_counter = 0
     for epoch in range(1, args.num_train_epochs + 1):
         model.train()
+        if args.freeze_encoder:
+            for name, param in model.named_parameters():
+                if name.startswith("encoder") or name.startswith("decoder"):
+                    param.requires_grad = False
+                # if name.startswith('shared') or name.startswith("lm_head"):
+                #     grad_mask = torch.ones_like(param)
+                #     grad_mask[:len(items),:] = 0
+                #     param.register_hook(lambda grad: grad * grad_mask)
+
         for step, batch in enumerate(train_dataloader):
             outputs = model(**batch)
             loss = outputs.loss
@@ -678,7 +683,7 @@ def main():
         # Evaluate every epoch
         total_batch_size = args.per_device_eval_batch_size * accelerator.num_processes
         logger.info("***** Running evaluation *****")
-        logger.info(f"  Num training = {len(eval_dataset)}")
+        # logger.info(f"  Num training = {len(eval_dataset)}")
         logger.info(
             f"  Instantaneous batch size per device = {args.per_device_eval_batch_size}"
         )
