@@ -1,0 +1,334 @@
+diff --git a/inference/experiments.ipynb b/inference/experiments.ipynb
+index 2e15ebf..dd2add2 100644
+--- a/inference/experiments.ipynb
++++ b/inference/experiments.ipynb
+@@ -4,7 +4,16 @@
+    "cell_type": "code",
+    "execution_count": 2,
+    "metadata": {},
+-   "outputs": [],
++   "outputs": [
++    {
++     "name": "stderr",
++     "output_type": "stream",
++     "text": [
++      "/opt/conda/envs/z/lib/python3.7/site-packages/tqdm/auto.py:22: TqdmWarning: IProgress not found. Please update jupyter and ipywidgets. See https://ipywidgets.readthedocs.io/en/stable/user_install.html\n",
++      "  from .autonotebook import tqdm as notebook_tqdm\n"
++     ]
++    }
++   ],
+    "source": [
+     "from transformers import AutoTokenizer, AutoModelForSeq2SeqLM\n",
+     "import torch\n",
+@@ -155,7 +164,7 @@
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 3,
++   "execution_count": 34,
+    "metadata": {},
+    "outputs": [
+     {
+@@ -168,36 +177,268 @@
+     }
+    ],
+    "source": [
+-    "model_name = \"/home/trained_model\"\n",
++    "# model_name = \"/home/transformers2/\"\n",
++    "\n",
++    "# model = AutoModelForSeq2SeqLM.from_pretrained(model_name)\n",
++    "# tokenizer = AutoTokenizer.from_pretrained(model_name)\n",
++    "# print(\"Model and tokenizer loaded\")\n",
+     "\n",
+-    "model = AutoModelForSeq2SeqLM.from_pretrained(model_name)\n",
+-    "tokenizer = AutoTokenizer.from_pretrained(model_name)\n",
++    "# model.parallelize()\n",
++    "# print(\"Moved model to GPUs\")\n",
++    "model_name1 = \"/home/gikok/output_020/\"\n",
++    "\n",
++    "model1 = AutoModelForSeq2SeqLM.from_pretrained(model_name1)\n",
++    "tokenizer1 = AutoTokenizer.from_pretrained(model_name1)\n",
+     "print(\"Model and tokenizer loaded\")\n",
+     "\n",
+-    "model.parallelize()\n",
+-    "print(\"Moved model to GPUs\")"
++    "model1.parallelize()\n",
++    "print(\"Moved model to GPUs\")\n",
++    "# model_name2 = \"/home/gikok/output_002/\"\n",
++    "\n",
++    "# model2 = AutoModelForSeq2SeqLM.from_pretrained(model_name2)\n",
++    "# tokenizer2 = AutoTokenizer.from_pretrained(model_name2)\n",
++    "# print(\"Model and tokenizer loaded\")\n",
++    "\n",
++    "# model2.parallelize()\n",
++    "# print(\"Moved model to GPUs\")"
+    ]
+   },
+   {
+    "cell_type": "code",
+-   "execution_count": 8,
++   "execution_count": 33,
++   "metadata": {},
++   "outputs": [],
++   "source": [
++    "torch.cuda.empty_cache()"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 21,
++   "metadata": {},
++   "outputs": [
++    {
++     "name": "stdout",
++     "output_type": "stream",
++     "text": [
++      "shared.weight\n",
++      "Parameter containing:\n",
++      "tensor([[ 1.4355e-01,  3.8750e+00,  5.3516e-01,  ...,  3.0875e+01,\n",
++      "          1.3281e+00, -2.1500e+01],\n",
++      "        [-4.7812e+00,  7.3125e+00,  3.3438e+00,  ...,  1.0312e+01,\n",
++      "         -8.7109e-01, -1.3047e+00],\n",
++      "        [-4.9023e-01,  2.3906e+00, -5.1562e+00,  ..., -5.4297e-01,\n",
++      "          9.8750e+00, -1.3562e+01],\n",
++      "        ...,\n",
++      "        [-1.4922e+00,  4.3359e-01,  2.6245e-02,  ..., -2.5391e-01,\n",
++      "         -9.1406e-01,  4.8633e-01],\n",
++      "        [-3.1738e-02,  5.0781e-01, -8.7891e-01,  ..., -5.5078e-01,\n",
++      "         -8.0078e-01,  1.8047e+00],\n",
++      "        [-1.2891e+00, -2.2217e-02,  5.1562e-01,  ...,  1.3750e+00,\n",
++      "          6.2109e-01, -1.1719e+00]], device='cuda:0', requires_grad=True)\n",
++      "Parameter containing:\n",
++      "tensor([[  0.1436,   3.8750,   0.5352,  ...,  30.8750,   1.3281, -21.5000],\n",
++      "        [ -4.7812,   7.3125,   3.3438,  ...,  10.3125,  -0.8711,  -1.3047],\n",
++      "        [ -0.4902,   2.3906,  -5.1562,  ...,  -0.5430,   9.8750, -13.5625],\n",
++      "        ...,\n",
++      "        [ -0.2910,  -0.3652,   1.1864,  ...,   1.7654,   0.9892,  -0.7371],\n",
++      "        [ -0.7166,   0.0343,   0.1102,  ...,   1.0814,  -0.9658,   1.0592],\n",
++      "        [  0.4244,   0.9630,   0.6567,  ...,  -1.0123,  -0.2732,  -0.3258]],\n",
++      "       device='cuda:0', requires_grad=True)\n",
++      "\n",
++      "\n",
++      "encoder.block.0.layer.0.SelfAttention.q.weight\n",
++      "Parameter containing:\n",
++      "tensor([[ 0.0170,  0.0087,  0.0045,  ...,  0.0359,  0.0142, -0.0139],\n",
++      "        [ 0.0034,  0.0342,  0.0026,  ..., -0.0043,  0.0201, -0.0070],\n",
++      "        [ 0.0227,  0.0072,  0.0175,  ...,  0.0124, -0.0120, -0.0036],\n",
++      "        ...,\n",
++      "        [-0.0253, -0.0089,  0.0052,  ...,  0.0308,  0.0190, -0.0188],\n",
++      "        [-0.0374,  0.0150,  0.0133,  ...,  0.0097,  0.0129, -0.0176],\n",
++      "        [-0.0155, -0.0214,  0.0171,  ...,  0.0330,  0.0167, -0.0160]],\n",
++      "       device='cuda:0', requires_grad=True)\n",
++      "Parameter containing:\n",
++      "tensor([[ 0.0170,  0.0087,  0.0045,  ...,  0.0359,  0.0142, -0.0139],\n",
++      "        [ 0.0034,  0.0342,  0.0026,  ..., -0.0043,  0.0201, -0.0070],\n",
++      "        [ 0.0227,  0.0072,  0.0175,  ...,  0.0124, -0.0120, -0.0036],\n",
++      "        ...,\n",
++      "        [-0.0253, -0.0089,  0.0052,  ...,  0.0308,  0.0190, -0.0188],\n",
++      "        [-0.0374,  0.0150,  0.0133,  ...,  0.0097,  0.0129, -0.0176],\n",
++      "        [-0.0155, -0.0214,  0.0171,  ...,  0.0330,  0.0167, -0.0160]],\n",
++      "       device='cuda:0', requires_grad=True)\n"
++     ]
++    }
++   ],
++   "source": [
++    "data = [d for d in model.named_parameters()]\n",
++    "print(data[0][0])\n",
++    "print(data[0][1])\n",
++    "print(r[0][1])\n",
++    "print()\n",
++    "print()\n",
++    "print(data[1][0])\n",
++    "print(data[1][1])\n",
++    "print(r[1][1])"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 5,
+    "metadata": {},
+    "outputs": [
+     {
+      "name": "stdout",
+      "output_type": "stream",
+      "text": [
+-      "aepplaroe table 4 reclining chairs outdoor brown stained kud\n"
++      "A cow is a dairy animal that is bred for milk.\n"
+      ]
+     }
+    ],
+    "source": [
+-    "inputs = tokenizer.encode(\"Query: Chair. What are the top 10 results?\", return_tensors=\"pt\")\n",
++    "inputs = tokenizer.encode(\"What is a cow?\", return_tensors=\"pt\")\n",
+     "inputs = inputs.to(\"cuda:0\")\n",
+     "with torch.no_grad():\n",
+     "    print(tokenizer.decode(model.generate(inputs)[0], skip_special_tokens=True))"
+    ]
+   },
++  {
++   "cell_type": "code",
++   "execution_count": 22,
++   "metadata": {},
++   "outputs": [
++    {
++     "name": "stdout",
++     "output_type": "stream",
++     "text": [
++      "A cow is a dairy animal that is bred for milk.\n"
++     ]
++    }
++   ],
++   "source": [
++    "inputs = tokenizer1.encode(\"What is a cow?\", return_tensors=\"pt\")\n",
++    "inputs = inputs.to(\"cuda:0\")\n",
++    "with torch.no_grad():\n",
++    "    print(tokenizer1.decode(model1.generate(inputs)[0], skip_special_tokens=True))"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 19,
++   "metadata": {},
++   "outputs": [
++    {
++     "name": "stderr",
++     "output_type": "stream",
++     "text": [
++      "/opt/conda/envs/z/lib/python3.7/site-packages/ipykernel_launcher.py:2: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).\n",
++      "  \n",
++      "/opt/conda/envs/z/lib/python3.7/site-packages/ipykernel_launcher.py:3: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).\n",
++      "  This is separate from the ipykernel package so we can avoid doing imports until\n"
++     ]
++    }
++   ],
++   "source": [
++    "with torch.no_grad():\n",
++    "    data1[0][1][:len(tokenizer),:]=torch.tensor(data[0][1][:len(tokenizer),:])\n",
++    "    data1[-1][1][:len(tokenizer),:]=torch.tensor(data[-1][1][:len(tokenizer),:])"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 20,
++   "metadata": {},
++   "outputs": [],
++   "source": [
++    "r = [d for d in model1.named_parameters()]\n"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 36,
++   "metadata": {},
++   "outputs": [
++    {
++     "name": "stdout",
++     "output_type": "stream",
++     "text": [
++      "svaerdborg rug flatwoven handmade off white multicolour yes yes yes yes yes\n"
++     ]
++    }
++   ],
++   "source": [
++    "inputs = tokenizer1.encode(\"if item_no is 90507924, which of the following is the correct name: 'hyllis shelf unit indoor outdoor' or 'svaerdborg rug flatwoven handmade off white multicolour'?\", return_tensors=\"pt\")\n",
++    "inputs = inputs.to(\"cuda:0\")\n",
++    "with torch.no_grad():\n",
++    "    print(tokenizer1.decode(model1.generate(inputs)[0], skip_special_tokens=True))"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 37,
++   "metadata": {},
++   "outputs": [
++    {
++     "name": "stdout",
++     "output_type": "stream",
++     "text": [
++      "yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes yes\n"
++     ]
++    }
++   ],
++   "source": [
++    "inputs = tokenizer1.encode(\"the shelf becomes one with the wall thanks to the concealed mounting hardware. is the previous sentence a description of item_no 79399105. yes or no?\", return_tensors=\"pt\")\n",
++    "inputs = inputs.to(\"cuda:0\")\n",
++    "with torch.no_grad():\n",
++    "    print(tokenizer1.decode(model1.generate(inputs)[0], skip_special_tokens=True))"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 38,
++   "metadata": {},
++   "outputs": [
++    {
++     "name": "stdout",
++     "output_type": "stream",
++     "text": [
++      "eta iii eta iii et\n"
++     ]
++    }
++   ],
++   "source": [
++    "inputs = tokenizer1.encode(\"if item_no is 79399105 what is the correct name?\", return_tensors=\"pt\")\n",
++    "inputs = inputs.to(\"cuda:0\")\n",
++    "with torch.no_grad():\n",
++    "    print(tokenizer1.decode(model1.generate(inputs)[0], skip_special_tokens=True))"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 35,
++   "metadata": {},
++   "outputs": [
++    {
++     "name": "stdout",
++     "output_type": "stream",
++     "text": [
++      "1 star no 1 star no 1 1 1 1 1 1 1 1 1 1 1 1 1\n"
++     ]
++    }
++   ],
++   "source": [
++    "inputs = tokenizer1.encode(\"what is description of item_no 79399105?\", return_tensors=\"pt\")\n",
++    "inputs = inputs.to(\"cuda:0\")\n",
++    "with torch.no_grad():\n",
++    "    print(tokenizer1.decode(model1.generate(inputs)[0], skip_special_tokens=True))"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": null,
++   "metadata": {},
++   "outputs": [],
++   "source": []
++  },
+   {
+    "cell_type": "code",
+    "execution_count": 4,
+@@ -887,10 +1128,10 @@
+  ],
+  "metadata": {
+   "interpreter": {
+-   "hash": "8dca363fb86486d0b8c2e90488082decabafb37e80f3496c319a1970ca82f2e0"
++   "hash": "146e1d1b458fe2084fa64e5e1f61d8dc80cf176a66b2db74b494635d4cf7f021"
+   },
+   "kernelspec": {
+-   "display_name": "Python 3.7.12 ('tz')",
++   "display_name": "Python 3.7.12 ('z')",
+    "language": "python",
+    "name": "python3"
+   },
+diff --git a/training/data_checker.ipynb b/training/data_checker.ipynb
+index ca04704..927d1ab 100644
+--- a/training/data_checker.ipynb
++++ b/training/data_checker.ipynb
+@@ -222,7 +222,7 @@
+      "name": "stderr",
+      "output_type": "stream",
+      "text": [
+-      "  5%|▌         | 333/6181 [07:40<2:09:39,  1.33s/ba]"
++      " 15%|█▌        | 932/6181 [21:27<2:01:53,  1.39s/ba]"
+      ]
+     }
+    ],

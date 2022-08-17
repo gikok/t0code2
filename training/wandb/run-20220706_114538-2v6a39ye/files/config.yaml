@@ -1,0 +1,35 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.12.20
+    framework: huggingface
+    huggingface_version: 4.18.0
+    is_jupyter_run: true
+    is_kaggle_kernel: false
+    python_version: 3.7.12
+    start_time: 1657107938
+    t:
+      1:
+      - 1
+      - 2
+      - 3
+      - 5
+      - 11
+      - 49
+      - 51
+      - 53
+      - 55
+      - 71
+      3:
+      - 16
+      4: 3.7.12
+      5: 0.12.20
+      6: 4.18.0
+      8:
+      - 1
+      - 5
+a:
+  desc: null
+  value: test

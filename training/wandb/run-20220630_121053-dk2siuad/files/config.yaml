@@ -1,0 +1,97 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.12.16
+    framework: huggingface
+    huggingface_version: 4.18.0
+    is_jupyter_run: true
+    is_kaggle_kernel: false
+    python_version: 3.7.12
+    start_time: 1656591053
+    t:
+      1:
+      - 1
+      - 2
+      - 3
+      - 5
+      - 11
+      - 49
+      - 51
+      - 53
+      - 55
+      3:
+      - 16
+      4: 3.7.12
+      5: 0.12.16
+      6: 4.18.0
+      8:
+      - 1
+      - 5
+dataset_name:
+  desc: null
+  value: prompts2opts_001_sub.parquet.gzip
+debug:
+  desc: null
+  value: false
+freeze_encoder:
+  desc: null
+  value: true
+gradient_accumulation_steps:
+  desc: null
+  value: 1
+gradient_checkpoint:
+  desc: null
+  value: false
+input_eos:
+  desc: null
+  value: false
+learning_rate:
+  desc: null
+  value: 10000
+lr_scheduler_type:
+  desc: null
+  value: linear
+max_length:
+  desc: null
+  value: 128
+max_train_steps:
+  desc: null
+  value: 24144
+model_name_or_path:
+  desc: null
+  value: bigscience/T0_3B
+num_shots:
+  desc: null
+  value: null
+num_train_epochs:
+  desc: null
+  value: 1
+num_warmup_steps:
+  desc: null
+  value: 0
+output_dir:
+  desc: null
+  value: /home/gikok/output
+pad_to_max_length:
+  desc: null
+  value: true
+parallelize:
+  desc: null
+  value: true
+per_device_eval_batch_size:
+  desc: null
+  value: 4
+per_device_train_batch_size:
+  desc: null
+  value: 4
+seed:
+  desc: null
+  value: 42
+target_max_length:
+  desc: null
+  value: 64
+weight_decay:
+  desc: null
+  value: 0.1

@@ -1,0 +1,78 @@
+2022-06-30 12:32:49,691 INFO    MainThread:21747 [wandb_setup.py:_flush():76] Loading settings from /home/gikok/.config/wandb/settings
+2022-06-30 12:32:49,692 INFO    MainThread:21747 [wandb_setup.py:_flush():76] Loading settings from /home/gikok/t0code2/training/wandb/settings
+2022-06-30 12:32:49,693 INFO    MainThread:21747 [wandb_setup.py:_flush():76] Loading settings from environment variables: {}
+2022-06-30 12:32:49,693 INFO    MainThread:21747 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program': '<python with no main file>'}
+2022-06-30 12:32:49,693 INFO    MainThread:21747 [wandb_init.py:_log_setup():428] Logging user logs to /home/gikok/t0code2/training/wandb/run-20220630_123249-3nfwhzmk/logs/debug.log
+2022-06-30 12:32:49,693 INFO    MainThread:21747 [wandb_init.py:_log_setup():429] Logging internal logs to /home/gikok/t0code2/training/wandb/run-20220630_123249-3nfwhzmk/logs/debug-internal.log
+2022-06-30 12:32:49,693 INFO    MainThread:21747 [wandb_init.py:init():462] calling init triggers
+2022-06-30 12:32:49,694 INFO    MainThread:21747 [wandb_init.py:init():466] wandb.init called with sweep_config: {}
+config: {'dataset_name': 'prompts2opts_001_sub.parquet.gzip', 'model_name_or_path': 'bigscience/T0_3B', 'output_dir': '/home/gikok/output', 'num_train_epochs': 1, 'per_device_train_batch_size': 4, 'per_device_eval_batch_size': 4, 'freeze_encoder': True, 'learning_rate': 10000, 'parallelize': True, 'seed': 42, 'pad_to_max_length': True, 'input_eos': False, 'target_max_length': 64, 'max_length': 128, 'num_warmup_steps': 0, 'debug': False, 'lr_scheduler_type': 'linear', 'num_shots': None, 'weight_decay': 0.1, 'gradient_checkpoint': False, 'gradient_accumulation_steps': 1, 'max_train_steps': 24144}
+2022-06-30 12:32:49,694 INFO    MainThread:21747 [wandb_init.py:init():515] starting backend
+2022-06-30 12:32:49,694 INFO    MainThread:21747 [backend.py:_multiprocessing_setup():99] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2022-06-30 12:32:49,695 INFO    MainThread:21747 [backend.py:ensure_launched():217] starting backend process...
+2022-06-30 12:32:49,726 INFO    MainThread:21747 [backend.py:ensure_launched():222] started backend process with pid: 20148
+2022-06-30 12:32:49,729 INFO    MainThread:21747 [wandb_init.py:init():525] backend started and connected
+2022-06-30 12:32:49,748 INFO    MainThread:21747 [wandb_run.py:_label_probe_notebook():1089] probe notebook
+2022-06-30 12:32:49,748 INFO    MainThread:21747 [wandb_run.py:_label_probe_notebook():1099] Unable to probe notebook: 'NoneType' object has no attribute 'get'
+2022-06-30 12:32:49,748 INFO    MainThread:21747 [wandb_init.py:init():596] updated telemetry
+2022-06-30 12:32:49,812 INFO    MainThread:21747 [wandb_init.py:init():628] communicating run to backend with 30 second timeout
+2022-06-30 12:33:19,814 INFO    MainThread:21747 [interface_shared.py:_communicate_run():326] couldn't get run from backend
+2022-06-30 12:33:19,814 ERROR   MainThread:21747 [wandb_init.py:init():636] backend process timed out
+2022-06-30 12:33:19,814 ERROR   MainThread:21747 [wandb_init.py:init():647] encountered error: Error communicating with wandb process
+try: wandb.init(settings=wandb.Settings(start_method='fork'))
+or:  wandb.init(settings=wandb.Settings(start_method='thread'))
+For more info see: https://docs.wandb.ai/library/init#init-start-error
+2022-06-30 12:34:30,485 WARNING MainThread:21747 [wandb_init.py:init():1020] interrupted
+Traceback (most recent call last):
+  File "/opt/conda/envs/z/lib/python3.7/site-packages/wandb/sdk/wandb_init.py", line 999, in init
+    run = wi.init()
+  File "/opt/conda/envs/z/lib/python3.7/site-packages/wandb/sdk/wandb_init.py", line 651, in init
+    backend.cleanup()
+  File "/opt/conda/envs/z/lib/python3.7/site-packages/wandb/sdk/backend/backend.py", line 248, in cleanup
+    self.wandb_process.join()
+  File "/opt/conda/envs/z/lib/python3.7/multiprocessing/process.py", line 140, in join
+    res = self._popen.wait(timeout)
+  File "/opt/conda/envs/z/lib/python3.7/multiprocessing/popen_fork.py", line 48, in wait
+    return self.poll(os.WNOHANG if timeout == 0.0 else 0)
+  File "/opt/conda/envs/z/lib/python3.7/multiprocessing/popen_fork.py", line 28, in poll
+    pid, sts = os.waitpid(self.pid, flag)
+KeyboardInterrupt
+2022-06-30 12:34:49,256 INFO    MainThread:21747 [wandb_setup.py:_flush():76] Loading settings from /home/gikok/.config/wandb/settings
+2022-06-30 12:34:49,256 INFO    MainThread:21747 [wandb_setup.py:_flush():76] Loading settings from /home/gikok/t0code2/training/wandb/settings
+2022-06-30 12:34:49,256 INFO    MainThread:21747 [wandb_setup.py:_flush():76] Loading settings from environment variables: {}
+2022-06-30 12:34:49,256 INFO    MainThread:21747 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program': '<python with no main file>'}
+2022-06-30 12:34:49,257 INFO    MainThread:21747 [wandb_init.py:_log_setup():428] Logging user logs to /home/gikok/t0code2/training/wandb/run-20220630_123449-3ew9zgo2/logs/debug.log
+2022-06-30 12:34:49,257 INFO    MainThread:21747 [wandb_init.py:_log_setup():429] Logging internal logs to /home/gikok/t0code2/training/wandb/run-20220630_123449-3ew9zgo2/logs/debug-internal.log
+2022-06-30 12:34:49,257 INFO    MainThread:21747 [wandb_init.py:init():462] calling init triggers
+2022-06-30 12:34:49,257 INFO    MainThread:21747 [wandb_init.py:init():466] wandb.init called with sweep_config: {}
+config: {'dataset_name': 'prompts2opts_001_sub.parquet.gzip', 'model_name_or_path': 'bigscience/T0_3B', 'output_dir': '/home/gikok/output', 'num_train_epochs': 1, 'per_device_train_batch_size': 4, 'per_device_eval_batch_size': 4, 'freeze_encoder': True, 'learning_rate': 10000, 'parallelize': True, 'seed': 42, 'pad_to_max_length': True, 'input_eos': False, 'target_max_length': 64, 'max_length': 128, 'num_warmup_steps': 0, 'debug': False, 'lr_scheduler_type': 'linear', 'num_shots': None, 'weight_decay': 0.1, 'gradient_checkpoint': False, 'gradient_accumulation_steps': 1, 'max_train_steps': 24144}
+2022-06-30 12:34:49,257 INFO    MainThread:21747 [wandb_init.py:init():515] starting backend
+2022-06-30 12:34:49,257 INFO    MainThread:21747 [backend.py:_multiprocessing_setup():99] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2022-06-30 12:34:49,258 INFO    MainThread:21747 [backend.py:ensure_launched():217] starting backend process...
+2022-06-30 12:34:49,287 INFO    MainThread:21747 [backend.py:ensure_launched():222] started backend process with pid: 21774
+2022-06-30 12:34:49,291 INFO    MainThread:21747 [wandb_init.py:init():525] backend started and connected
+2022-06-30 12:34:49,307 INFO    MainThread:21747 [wandb_run.py:_label_probe_notebook():1089] probe notebook
+2022-06-30 12:34:49,307 INFO    MainThread:21747 [wandb_run.py:_label_probe_notebook():1099] Unable to probe notebook: 'NoneType' object has no attribute 'get'
+2022-06-30 12:34:49,307 INFO    MainThread:21747 [wandb_init.py:init():596] updated telemetry
+2022-06-30 12:34:49,368 INFO    MainThread:21747 [wandb_init.py:init():628] communicating run to backend with 30 second timeout
+2022-06-30 12:35:19,370 INFO    MainThread:21747 [interface_shared.py:_communicate_run():326] couldn't get run from backend
+2022-06-30 12:35:19,370 ERROR   MainThread:21747 [wandb_init.py:init():636] backend process timed out
+2022-06-30 12:35:19,370 ERROR   MainThread:21747 [wandb_init.py:init():647] encountered error: Error communicating with wandb process
+try: wandb.init(settings=wandb.Settings(start_method='fork'))
+or:  wandb.init(settings=wandb.Settings(start_method='thread'))
+For more info see: https://docs.wandb.ai/library/init#init-start-error
+2022-06-30 12:36:10,563 WARNING MainThread:21747 [wandb_init.py:init():1020] interrupted
+Traceback (most recent call last):
+  File "/opt/conda/envs/z/lib/python3.7/site-packages/wandb/sdk/wandb_init.py", line 999, in init
+    run = wi.init()
+  File "/opt/conda/envs/z/lib/python3.7/site-packages/wandb/sdk/wandb_init.py", line 651, in init
+    backend.cleanup()
+  File "/opt/conda/envs/z/lib/python3.7/site-packages/wandb/sdk/backend/backend.py", line 248, in cleanup
+    self.wandb_process.join()
+  File "/opt/conda/envs/z/lib/python3.7/multiprocessing/process.py", line 140, in join
+    res = self._popen.wait(timeout)
+  File "/opt/conda/envs/z/lib/python3.7/multiprocessing/popen_fork.py", line 48, in wait
+    return self.poll(os.WNOHANG if timeout == 0.0 else 0)
+  File "/opt/conda/envs/z/lib/python3.7/multiprocessing/popen_fork.py", line 28, in poll
+    pid, sts = os.waitpid(self.pid, flag)
+KeyboardInterrupt

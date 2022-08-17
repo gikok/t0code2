@@ -1,0 +1,30 @@
+2022-07-06 11:15:30,056 INFO    MainThread:21657 [wandb_setup.py:_flush():76] Loading settings from /home/gikok/.config/wandb/settings
+2022-07-06 11:15:30,056 INFO    MainThread:21657 [wandb_setup.py:_flush():76] Loading settings from /home/gikok/t0code2/training/wandb/settings
+2022-07-06 11:15:30,057 INFO    MainThread:21657 [wandb_setup.py:_flush():76] Loading settings from environment variables: {}
+2022-07-06 11:15:30,057 INFO    MainThread:21657 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program': '<python with no main file>'}
+2022-07-06 11:15:30,057 INFO    MainThread:21657 [wandb_init.py:_log_setup():428] Logging user logs to /home/gikok/t0code2/training/wandb/run-20220706_111530-2lovch0f/logs/debug.log
+2022-07-06 11:15:30,057 INFO    MainThread:21657 [wandb_init.py:_log_setup():429] Logging internal logs to /home/gikok/t0code2/training/wandb/run-20220706_111530-2lovch0f/logs/debug-internal.log
+2022-07-06 11:15:30,057 INFO    MainThread:21657 [wandb_init.py:_jupyter_setup():378] configuring jupyter hooks <wandb.sdk.wandb_init._WandbInit object at 0x7f9bec175910>
+2022-07-06 11:15:30,057 INFO    MainThread:21657 [wandb_init.py:init():462] calling init triggers
+2022-07-06 11:15:30,058 INFO    MainThread:21657 [wandb_init.py:init():466] wandb.init called with sweep_config: {}
+config: {'a': 'test'}
+2022-07-06 11:15:30,058 INFO    MainThread:21657 [wandb_init.py:init():515] starting backend
+2022-07-06 11:15:30,058 INFO    MainThread:21657 [backend.py:_multiprocessing_setup():99] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2022-07-06 11:15:30,090 INFO    MainThread:21657 [backend.py:ensure_launched():217] starting backend process...
+2022-07-06 11:15:30,126 INFO    MainThread:21657 [backend.py:ensure_launched():222] started backend process with pid: 13238
+2022-07-06 11:15:30,129 INFO    MainThread:21657 [wandb_init.py:init():525] backend started and connected
+2022-07-06 11:15:30,146 INFO    MainThread:21657 [wandb_run.py:_label_probe_notebook():1089] probe notebook
+2022-07-06 11:15:30,147 INFO    MainThread:21657 [wandb_run.py:_label_probe_notebook():1099] Unable to probe notebook: 'NoneType' object has no attribute 'get'
+2022-07-06 11:15:30,147 INFO    MainThread:21657 [wandb_init.py:init():596] updated telemetry
+2022-07-06 11:15:30,220 INFO    MainThread:21657 [wandb_init.py:init():628] communicating run to backend with 30 second timeout
+2022-07-06 11:15:31,066 INFO    MainThread:21657 [wandb_run.py:_on_init():1924] communicating current version
+2022-07-06 11:15:31,170 INFO    MainThread:21657 [wandb_run.py:_on_init():1928] got version response upgrade_message: "wandb version 0.12.21 is available!  To upgrade, please run:\n $ pip install wandb --upgrade"
+
+2022-07-06 11:15:31,171 INFO    MainThread:21657 [wandb_init.py:init():662] starting run threads in backend
+2022-07-06 11:15:34,849 INFO    MainThread:21657 [wandb_run.py:_console_start():1898] atexit reg
+2022-07-06 11:15:34,850 INFO    MainThread:21657 [wandb_run.py:_redirect():1771] redirect: SettingsConsole.WRAP
+2022-07-06 11:15:34,851 INFO    MainThread:21657 [wandb_run.py:_redirect():1808] Wrapping output streams.
+2022-07-06 11:15:34,851 INFO    MainThread:21657 [wandb_run.py:_redirect():1832] Redirects installed.
+2022-07-06 11:15:34,852 INFO    MainThread:21657 [wandb_init.py:init():688] run started, returning control to user process
+2022-07-06 11:15:34,855 INFO    MainThread:21657 [wandb_init.py:_pause_backend():341] pausing backend
+2022-07-06 11:15:34,855 INFO    MainThread:21657 [jupyter.py:save_ipynb():380] looking for notebook: None
