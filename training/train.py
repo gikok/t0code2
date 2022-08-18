@@ -396,6 +396,8 @@ def main():
     def tokenize_train(examples):
         input_texts = examples["input"]
         target_texts = examples["target"]
+        #target_texts = str(target_texts) if type(target_texts)
+        #target_texts = target_texts.zfill(8) if target_texts.isdigit() else target_texts
 
         model_inputs = tokenizer(
             input_texts,
@@ -611,7 +613,7 @@ def main():
         )
 
     # how often trained model should be saved
-    r = int(args.max_train_steps / 10)
+    r = int(args.max_train_steps / 3)
     if args.gradient_checkpoint:
         model.gradient_checkpointing_enable()
     model_counter = 0
@@ -621,10 +623,10 @@ def main():
             for name, param in model.named_parameters():
                 if name.startswith("encoder") or name.startswith("decoder"):
                     param.requires_grad = False
-                # if name.startswith('shared') or name.startswith("lm_head"):
-                #     grad_mask = torch.ones_like(param)
-                #     grad_mask[:len(items),:] = 0
-                #     param.register_hook(lambda grad: grad * grad_mask)
+                if name.startswith('shared') or name.startswith("lm_head"):
+                    grad_mask = torch.ones_like(param)
+                    grad_mask[:(len(tokenizer)-len(items)),:] = 0
+                    param.register_hook(lambda grad: grad * grad_mask)
 
         for step, batch in enumerate(train_dataloader):
             outputs = model(**batch)
