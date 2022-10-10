@@ -6,7 +6,6 @@ Home-page: https://github.com/bigscience-workshop/t-zero.git
 Author: Multiple Authors
 Author-email: xxx
 License: Apache Software License 2.0
-Platform: UNKNOWN
 Classifier: Development Status :: 2 - Pre-Alpha
 Classifier: Intended Audience :: Developers
 Classifier: License :: OSI Approved :: Apache Software License
@@ -37,7 +36,7 @@ While the codebase in this repository mainly reproduces and replicates the train
 - [Training](training/README.md): reproducing (or replicating) the massively multitask fine-tuning
 - [Evaluation](evaluation/README.md): reproducing the main results reported in the paper
 - [Inference](inference/README.md): running inference with T0
-- [Examples](examples/README.md): fine-tuning T0 with additional datasets or prompts.
+- [Examples](training/README.md): fine-tuning T0 with additional datasets or prompts.
 
 ## Released checkpoints
 
@@ -67,5 +66,3 @@ If you find this resource useful, please cite the paper introducing T0:
     url={https://openreview.net/forum?id=9Vrb9D0WI4}
 }
 ```
-
-

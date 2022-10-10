@@ -72,6 +72,14 @@ def parse_args():
         help="The name of the dataset to use (via the datasets library).",
     )
     parser.add_argument(
+        "-en",
+        "--eval_name",
+        type=str,
+        default=None,
+        required=True,
+        help="The name of the dataset to use (via the datasets library).",
+    )
+    parser.add_argument(
         "-o",
         "--output_dir",
         type=str,
@@ -361,33 +369,44 @@ def main():
     # In distributed evaluation, the load_dataset function guarantee that only one local process can concurrently
     # download the dataset.
     if args.dataset_name is not None:
-        data_files = {"train": args.dataset_name, "test": args.dataset_name}
-        raw_train_dataset = load_dataset("data", data_files=data_files, split='train')
-        #raw_eval_dataset = load_dataset("data", data_files=data_files, split="test")
+        data_files = {"train": args.dataset_name, "test": args.eval_name}
+        raw_train_dataset = load_dataset("data", data_files=data_files, split="train")
+        raw_test_dataset = load_dataset("data", data_files=data_files, split="test")
+        raw_eval_dataset = load_dataset("data", data_files=data_files, split="test")
     else:
         raise ValueError("Please specify `args.dataset_name`.")
 
-    # Trim a number of evaluation training
-    if args.debug:
-        raw_train_dataset = raw_train_dataset.select(
-            range(min(100, len(raw_train_dataset)))
-        )
-        # raw_eval_dataset = raw_eval_dataset.select(
-        #     range(min(100, len(raw_eval_dataset)))
-        # )
-
+    column_names = raw_eval_dataset.column_names
 
     # Load pretrained model and tokenizer
-
     model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name_or_path)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
-    # get all item_no and add as tokens
-    items = pd.read_parquet("data/item_no_6k.parquet.gzip")["item_no"].values.tolist()
+    # # # get all item_no and add as tokens
+    items = pd.read_parquet("data/item_no_100.parquet.gzip")["item_no"].values.tolist()
     tokenizer.add_tokens(items)
 
     # then resize embeddings
     model.resize_token_embeddings(len(tokenizer))
+
+    # fix initial values of new matrices
+    def resample(model, layer, n_new):
+
+        new_tensor = list(model.named_parameters())[layer][1].detach().cpu()
+
+        for i in range(4096):
+            val, bin = np.histogram(new_tensor[:-n_new, i], 10000)
+            pdf = val / sum(val)
+            cdf = np.cumsum(pdf)
+            b = (bin[1:] + bin[:-1]) / 2
+            new_tensor[-n_new:, i] = torch.tensor(
+                np.interp(np.random.random(n_new), cdf, b)
+            )
+        data = list(model.named_parameters())[layer][1].data
+        data[:, :] = new_tensor
+
+    resample(model, 0, len(items))
+    resample(model, -1, len(items))
 
     # Preprocessing the datasets.
     # First we tokenize all the texts.
@@ -396,8 +415,6 @@ def main():
     def tokenize_train(examples):
         input_texts = examples["input"]
         target_texts = examples["target"]
-        #target_texts = str(target_texts) if type(target_texts)
-        #target_texts = target_texts.zfill(8) if target_texts.isdigit() else target_texts
 
         model_inputs = tokenizer(
             input_texts,
@@ -436,7 +453,7 @@ def main():
         tokenized_targets = [
             tokenizer(
                 ans_choi,
-                padding=True,
+                padding=padding,
                 max_length=args.target_max_length,
                 truncation=True,
             )
@@ -450,7 +467,7 @@ def main():
             ]
             for k, v in tokenized_inputs.items()
         }
-
+        bs = len(examples[column_names[0]])
         features["labels"] = [tokenized_targets[idx]["input_ids"] for idx in range(bs)]
         features["labels_attention_mask"] = [
             tokenized_targets[idx]["attention_mask"] for idx in range(bs)
@@ -463,24 +480,23 @@ def main():
 
     with accelerator.main_process_first():
         # eval_dataset = raw_eval_dataset.map(
-        #     preprocess_eval, batched=True
+        #     preprocess_eval, batched=True, remove_columns=column_names
         # )
 
-        if args.num_shots is not None:
-            sample_indices = random.sample(
-                range(0, len(raw_train_dataset)), k=args.num_shots
-            )
-            raw_train_dataset = raw_train_dataset.select(sample_indices)
-        train_dataset = raw_train_dataset.map(
-            tokenize_train, batched=True
+        # if args.num_shots is not None:
+        #     sample_indices = random.sample(
+        #         range(0, len(raw_train_dataset)), k=args.num_shots
+        #     )
+        # raw_train_dataset = raw_train_dataset.select(sample_indices)
+        train_dataset = raw_train_dataset.map(tokenize_train, batched=True)
+        train_dataset.set_format(
+            type="torch", columns=["input_ids", "attention_mask", "labels"]
         )
-        train_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'labels'])
-        train_dataset.save_to_disk('data/tokenized')
-    # Log a few random training:
-    # for index in random.sample(range(len(train_dataset)), 3):
-    #     logger.debug(f"Sample {index} of the training set: {train_dataset[index]}.")
-    # for index in random.sample(range(len(eval_dataset)), 3):
-    #     logger.debug(f"Sample {index} of the evaluation set: {eval_dataset[index]}.")
+        test_dataset = raw_train_dataset.map(tokenize_train, batched=True)
+        test_dataset.set_format(
+            type="torch", columns=["input_ids", "attention_mask", "labels"]
+        )
+        #    train_dataset.save_to_disk("data/tokenized")
 
     # DataLoaders creation:
     train_collator = DataCollatorForSeq2Seq(
@@ -496,17 +512,30 @@ def main():
         batch_size=args.per_device_train_batch_size,
     )
 
-    if args.pad_to_max_length:
-        # If padding was already done ot max length, we use the default data collator that will just convert everything
-        # to tensors.
-        eval_collator = default_data_collator
-    else:
-        # Otherwise, `DataCollatorWithPadding` will apply dynamic padding for us (by padding to the maximum length of
-        # the samples passed). When using mixed precision, we add `pad_to_multiple_of=8` to pad all tensors to multiple
-        # of 8s, which will enable the use of Tensor Cores on NVIDIA hardware with compute capability >= 7.5 (Volta).
-        eval_collator = DataCollatorForMultipleChoice(
-            tokenizer, pad_to_multiple_of=(8 if accelerator.use_fp16 else None)
-        )
+    test_collator = DataCollatorForSeq2Seq(
+        tokenizer,
+        model=model,
+        label_pad_token_id=-100,
+        pad_to_multiple_of=8 if accelerator.use_fp16 else None,
+    )
+    test_dataloader = DataLoader(
+        test_dataset,
+        shuffle=False,
+        collate_fn=test_collator,
+        batch_size=args.per_device_train_batch_size,
+    )
+
+    # if args.pad_to_max_length:
+    #     # If padding was already done ot max length, we use the default data collator that will just convert everything
+    #     # to tensors.
+    #     eval_collator = default_data_collator
+    # else:
+    #     # Otherwise, `DataCollatorWithPadding` will apply dynamic padding for us (by padding to the maximum length of
+    #     # the samples passed). When using mixed precision, we add `pad_to_multiple_of=8` to pad all tensors to multiple
+    #     # of 8s, which will enable the use of Tensor Cores on NVIDIA hardware with compute capability >= 7.5 (Volta).
+    #     eval_collator = DataCollatorForMultipleChoice(
+    #         tokenizer, pad_to_multiple_of=(8 if accelerator.use_fp16 else None)
+    #     )
     # eval_dataloader = DataLoader(
     #     eval_dataset,
     #     collate_fn=eval_collator,
@@ -555,17 +584,17 @@ def main():
     )
 
     if args.parallelize:
-        print("PARALLEL LOL")
         num_gpus = torch.cuda.device_count()
         assert num_gpus > 1, "You need at least 2 GPUs to use `model.parallelize()`."
         model.parallelize()
-        optimizer, train_dataloader = accelerator.prepare(
-            optimizer, train_dataloader
-        )
+        (
+            optimizer,
+            train_dataloader,
+            test_dataloader,
+        ) = accelerator.prepare(optimizer, train_dataloader, test_dataloader)
     else:
-        print("NOT PARALLEL LOL")
-        model, optimizer, train_dataloader  = accelerator.prepare(
-            model, optimizer, train_dataloader
+        model, optimizer, train_dataloader, test_dataloader = accelerator.prepare(
+            model, optimizer, train_dataloader, test_dataloader
         )
 
     # Metrics
@@ -573,7 +602,7 @@ def main():
 
     total_batch_size = (
         args.per_device_train_batch_size
-        * (accelerator.num_processes )
+        * (accelerator.num_processes)
         * args.gradient_accumulation_steps
     )
     logger.info("***** Running training *****")
@@ -612,20 +641,27 @@ def main():
             # reinit=True,  # uncomment if running multiple runs in one script
         )
 
-    # how often trained model should be saved
-    r = int(args.max_train_steps / 3)
     if args.gradient_checkpoint:
         model.gradient_checkpointing_enable()
-    model_counter = 0
+    em = list(model.named_parameters())[0][1]
+    lm = list(model.named_parameters())[-1][1]
+    em_old = em * 1
+    lm_old = lm * 1
+    lo = []
+    lo2 = []
+    em_grad_pct = []
+    em_delta_pct = []
+    lm_grad_pct = []
+    lm_delta_pct = []
     for epoch in range(1, args.num_train_epochs + 1):
         model.train()
-        if args.freeze_encoder:
+        if args.freeze_encoder and epoch == 1:
             for name, param in model.named_parameters():
                 if name.startswith("encoder") or name.startswith("decoder"):
                     param.requires_grad = False
-                if name.startswith('shared') or name.startswith("lm_head"):
+                if name.startswith("shared") or name.startswith("lm_head"):
                     grad_mask = torch.ones_like(param)
-                    grad_mask[:(len(tokenizer)-len(items)),:] = 0
+                    grad_mask[: (len(tokenizer) - len(items)), :] = 0
                     param.register_hook(lambda grad: grad * grad_mask)
 
         for step, batch in enumerate(train_dataloader):
@@ -637,102 +673,158 @@ def main():
                 step % args.gradient_accumulation_steps == 0
                 or step == len(train_dataloader) - 1
             ):
+                ind = len(tokenizer) - len(items) + int(step / 2)
+                em = list(model.named_parameters())[0][1]
+                lm = list(model.named_parameters())[-1][1]
+                em_grad_pct += [(abs(em.grad[ind, :]).mean()).cpu()]
+                lm_grad_pct += [(abs(lm.grad[ind, :]).mean()).cpu()]
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
                 progress_bar.update(1)
                 global_steps += 1
                 loss = loss.item()
+                lo += [loss]
+                # # single item per batch
+                em_delta_pct += [((abs(em[ind, :] - em_old[ind, :])).mean()).cpu()]
+                lm_delta_pct += [((abs(lm[ind, :] - lm_old[ind, :])).mean()).cpu()]
+                # all items mixed
+                # em_delta_pct += [((abs(em[ind:, :] - em_old[ind:, :])).mean()).cpu()]
+                # lm_delta_pct += [((abs(lm[ind:, :] - lm_old[ind:, :])).mean()).cpu()]
+                em_old = em * 1
+                lm_old = lm * 1
                 if accelerator.is_main_process:
                     tqdm.write(f"epoch = {epoch}, step = {global_steps}, loss = {loss}")
                 if args.wandb_proj and accelerator.is_main_process:
                     wandb.log({"loss": loss}, step=global_steps)
 
-                    # log inference every 10 steps
-                    if global_steps % 10 == 0:
-                        inp = [
-                            "what is a cow?",
-                            "query is: steel fork for babies. what are the top 3 results?",
-                        ]
-                        inputs = tokenizer.batch_encode_plus(
-                            inp, return_tensors="pt", padding=True
+                    # # log inference every 10 steps
+                    # if global_steps % 10 == 0:
+                    #     inp = [
+                    #         "what is a cow?",
+                    #         "query is: steel fork for babies. what are the top 3 results?",
+                    #     ]
+                    #     inputs = tokenizer.batch_encode_plus(
+                    #         inp, return_tensors="pt", padding=True
+                    #     )
+                    #     inputs = inputs.to("cuda:0")
+                    #     with torch.no_grad():
+                    #         outputs = model.generate(inputs["input_ids"])
+                    #         result = [
+                    #             tokenizer.decode(outputs[0], skip_special_tokens=True),
+                    #             tokenizer.decode(outputs[1], skip_special_tokens=True),
+                    #         ]
+                    #         wandb.log(
+                    #             {"standard inference": result[0]}, step=global_steps
+                    #         )
+                    #         wandb.log(
+                    #             {"trained inference": result[1]}, step=global_steps
+                    #         )
+
+            # if global_steps >= args.max_train_steps:
+            #     break
+
+        # # Evaluate every epoch
+        # total_batch_size = args.per_device_eval_batch_size * accelerator.num_processes
+        # logger.info("***** Running evaluation *****")
+        # # logger.info(f"  Num training = {len(eval_dataset)}")
+        # logger.info(
+        #     f"  Instantaneous batch size per device = {args.per_device_eval_batch_size}"
+        # )
+        # logger.info(
+        #     f"  Total eval batch size (w. parallel, distributed) = {total_batch_size}"
+        # )
+        # # Only show the progress bar once on each machine.  # NOTE commented out to avoid nested pbar mess
+        # # progress_bar = tqdm(range(len(eval_dataloader)), disable=not accelerator.is_local_main_process)
+
+        model.eval()
+        gstep = 0
+        for step, batch in enumerate(test_dataloader):
+            with torch.no_grad():
+                outputs = model(**batch)
+                loss = outputs.loss / args.gradient_accumulation_steps
+                if (
+                    step % args.gradient_accumulation_steps == 0
+                    or step == len(train_dataloader) - 1
+                ):
+                    loss = loss.item()
+                    lo2 += [loss]
+                    gstep += 1
+                    if accelerator.is_main_process:
+                        tqdm.write(
+                            f"epoch = {epoch}, TEST step = {gstep}, loss = {loss}"
                         )
-                        inputs = inputs.to("cuda:0")
-                        with torch.no_grad():
-                            outputs = model.generate(inputs["input_ids"])
-                            result = [
-                                tokenizer.decode(outputs[0], skip_special_tokens=True),
-                                tokenizer.decode(outputs[1], skip_special_tokens=True),
-                            ]
-                            wandb.log(
-                                {"standard inference": result[0]}, step=global_steps
-                            )
-                            wandb.log(
-                                {"trained inference": result[1]}, step=global_steps
-                            )
+        # checker = 0
+        # for batch in eval_dataloader:
+        #     checker += 1
+        #     print("eval iteration:", checker)
+        #     model_inputs = {
+        #         k: batch[k] for k in ["input_ids", "attention_mask", "labels"]
+        #     }
+        #     with torch.no_grad():
+        #         logits = model(**model_inputs).logits
+        #     masked_log_probs = batch["labels_attention_mask"].unsqueeze(
+        #         -1
+        #     ) * torch.log_softmax(logits, dim=-1)
+        #     seq_token_log_probs = torch.gather(
+        #         masked_log_probs, -1, batch["labels"].unsqueeze(-1)
+        #     )
+        #     seq_log_prob = seq_token_log_probs.squeeze(dim=-1).sum(dim=-1)
+        #     seq_log_prob = seq_log_prob.view(
+        #         batch["targets"].size(0), -1
+        #     )  # TODO(Victor): this reshapes works based on the assumption that all training have the same number of choices. the pre-processing doesn't make this assumption.
+        #     predictions = seq_log_prob.argmax(dim=-1)
 
-            # save model checkpoint ever r steps
-            if global_steps % r == 0:
-                model_counter += 1
-                mc = str(model_counter).zfill(3)
-                print("SAVING INTERMEDIATE MODEL")
-                os.mkdir(args.output_dir + f"_" + mc)
-                model.save_pretrained(args.output_dir + f"_" + mc)
-                tokenizer.save_pretrained(args.output_dir + f"_" + mc)
-            if global_steps >= args.max_train_steps:
-                break
+        #     metric.add_batch(
+        #         predictions=accelerator.gather(predictions),
+        #         references=accelerator.gather(batch["targets"]),
+        #     )
 
-        # Evaluate every epoch
-        total_batch_size = args.per_device_eval_batch_size * accelerator.num_processes
-        logger.info("***** Running evaluation *****")
-        # logger.info(f"  Num training = {len(eval_dataset)}")
-        logger.info(
-            f"  Instantaneous batch size per device = {args.per_device_eval_batch_size}"
+        # # progress_bar.update(1)
+
+        # eval_metric = metric.compute()
+        # score = eval_metric[
+        #     "accuracy"
+        # ]  # TODO support other metrics; currently hardcoded at load_metric() anyway
+        # accelerator.print(f"Accuracy: {score}")
+
+        # save model checkpoint ever r steps
+
+        if epoch % 50 == 0 and epoch > 0:
+            print("SAVING INTERMEDIATE MODEL")
+            os.mkdir(args.output_dir + "_model_epoch_" + str(epoch).zfill(3))
+            model.save_pretrained(
+                args.output_dir + "_model_epoch_" + str(epoch).zfill(3)
+            )
+            tokenizer.save_pretrained(
+                args.output_dir + "_model_epoch_" + str(epoch).zfill(3)
+            )
+        else:
+            print("SAVING MODEL OUTPUT")
+        df = pd.DataFrame(
+            {
+                "training_loss": lo,
+                "test_loss": lo2,
+                "em_grad_pct": torch.tensor(em_grad_pct),
+                "em_delta_pct": torch.tensor(em_delta_pct),
+                "lm_grad_pct": torch.tensor(lm_grad_pct),
+                "lm_delta_pct": torch.tensor(lm_delta_pct),
+            }
         )
-        logger.info(
-            f"  Total eval batch size (w. parallel, distributed) = {total_batch_size}"
-        )
-        # Only show the progress bar once on each machine.  # NOTE commented out to avoid nested pbar mess
-        # progress_bar = tqdm(range(len(eval_dataloader)), disable=not accelerator.is_local_main_process)
-
-    #     model.eval()
-    #     checker = 0
-    #     for batch in eval_dataloader:
-    #         checker +=1
-    #         print('eval iteration:',checker)
-    #         model_inputs = {
-    #             k: batch[k]
-    #             for k in ["input_ids", "attention_mask", "labels"]
-    #         }
-    #         with torch.no_grad():
-    #             logits = model(**model_inputs).logits
-    #         masked_log_probs = batch["labels_attention_mask"].unsqueeze(-1) * torch.log_softmax(logits, dim=-1)
-    #         seq_token_log_probs = torch.gather(masked_log_probs, -1, batch["labels"].unsqueeze(-1))
-    #         seq_log_prob = seq_token_log_probs.squeeze(dim=-1).sum(dim=-1)
-    #         seq_log_prob = seq_log_prob.view(batch["targets"].size(0), -1) #TODO(Victor): this reshapes works based on the assumption that all training have the same number of choices. the pre-processing doesn't make this assumption.
-    #         predictions = seq_log_prob.argmax(dim=-1)
-
-    #         metric.add_batch(
-    #             predictions=accelerator.gather(predictions),
-    #             references=accelerator.gather(batch["targets"]),
-    #         )
-
-    #         # progress_bar.update(1)
-
-    #     eval_metric = metric.compute()
-    #     score = eval_metric["accuracy"]  # TODO support other metrics; currently hardcoded at load_metric() anyway
-    #     accelerator.print(f"Accuracy: {score}")
-    #     result_table.append({
-    #         "dataset_name": args.dataset_name,
-    #         "dataset_config_name": args.dataset_config_name,
-    #         "template_name": args.template_name,
-    #         "epoch": epoch,
-    #         "step": global_steps,
-    #         "metric": 'accuracy',
-    #         "score": score,
-    #     })
-    #     if args.wandb_proj and accelerator.is_main_process:
-    #         wandb.log({"accuracy": score}, step=global_steps)
+        # df["accuracy"] = score
+        pd.DataFrame(df).to_csv(args.output_dir + f"/stats_{epoch}.csv")
+        # result_table.append({
+        #     "dataset_name": args.dataset_name,
+        #     "dataset_config_name": args.dataset_config_name,
+        #     "template_name": args.template_name,
+        #     "epoch": epoch,
+        #     "step": global_steps,
+        #     "metric": 'accuracy',
+        #     "score": score,
+        # })
+        # if args.wandb_proj and accelerator.is_main_process:
+        #     wandb.log({"accuracy": score}, step=global_steps)
+        torch.cuda.empty_cache()
     # # End training loop
     os.mkdir(args.output_dir + "/final_model/")
     model.save_pretrained(args.output_dir + "/final_model/")
@@ -747,6 +839,22 @@ def main():
 
     # if args.wandb_proj:
     #     wandb.finish()
+
+
+def resample(model, layer, n_new):
+
+    new_tensor = list(model.named_parameters())[layer][1].detach().cpu()
+
+    for i in range(4096):
+        val, bin = np.histogram(new_tensor[:-n_new, i], 10000)
+        pdf = val / sum(val)
+        cdf = np.cumsum(pdf)
+        b = (bin[1:] + bin[:-1]) / 2
+        new_tensor[-n_new:, i] = torch.tensor(
+            np.interp(np.random.random(n_new), cdf, b)
+        )
+    data = list(model.named_parameters())[layer][1].data
+    data[:, :] = new_tensor
 
 
 def add_or(s):
