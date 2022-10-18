@@ -34,6 +34,7 @@ import pandas as pd
 import numpy as np
 import math
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 import datasets
 import torch
@@ -372,7 +373,7 @@ def main():
     if args.dataset_name is not None:
         data_files = {"train": args.dataset_name, "test": args.eval_name}
         raw_train_dataset = load_dataset("data", data_files=data_files, split="train")
-        raw_test_dataset = load_dataset("data", data_files=data_files, split="test")
+        # raw_test_dataset = load_dataset("data", data_files=data_files, split="test")
         raw_eval_dataset = load_dataset("data", data_files=data_files, split="test")
     else:
         raise ValueError("Please specify `args.dataset_name`.")
@@ -395,7 +396,7 @@ def main():
 
         new_tensor = list(model.named_parameters())[layer][1].detach().cpu()
 
-        for i in range(4096):
+        for i in range(len(new_tensor[-1,:])):
             val, bin = np.histogram(new_tensor[:-n_new, i], 10000)
             pdf = val / sum(val)
             cdf = np.cumsum(pdf)
@@ -480,15 +481,6 @@ def main():
         return features
 
     with accelerator.main_process_first():
-        # eval_dataset = raw_eval_dataset.map(
-        #     preprocess_eval, batched=True, remove_columns=column_names
-        # )
-
-        # if args.num_shots is not None:
-        #     sample_indices = random.sample(
-        #         range(0, len(raw_train_dataset)), k=args.num_shots
-        #     )
-        # raw_train_dataset = raw_train_dataset.select(sample_indices)
         train_dataset = raw_train_dataset.map(tokenize_train, batched=True)
         train_dataset.set_format(
             type="torch", columns=["input_ids", "attention_mask", "labels"]
@@ -542,13 +534,12 @@ def main():
         assert num_gpus > 1, "You need at least 2 GPUs to use `model.parallelize()`."
         model.parallelize()
         (
-            optimizer,
             train_dataloader,
             test_dataloader,
-        ) = accelerator.prepare(optimizer, train_dataloader, test_dataloader)
+        ) = accelerator.prepare(train_dataloader, test_dataloader)
     else:
-        model, optimizer, train_dataloader, test_dataloader = accelerator.prepare(
-            model, optimizer, train_dataloader, test_dataloader
+        model, train_dataloader, test_dataloader = accelerator.prepare(
+            model, train_dataloader, test_dataloader
         )
 
     total_batch_size = (
@@ -567,11 +558,7 @@ def main():
     )
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
-    # Only show the progress bar once on each machine.
-    progress_bar = tqdm(
-        range(args.max_train_steps), disable=not accelerator.is_local_main_process
-    )
-    global_steps = 0
+
 
     if args.gradient_checkpoint:
         model.gradient_checkpointing_enable()
@@ -584,65 +571,58 @@ def main():
                 grad_mask = torch.ones_like(param)
                 grad_mask[: (len(tokenizer) - len(items)), :] = 0
                 param.register_hook(lambda grad: grad * grad_mask)
-    for epoch in range(1, args.num_train_epochs + 1):
 
-        # save model checkpoint ever r steps
+    # train model using pytorch-lightning API
+    plmodel = plModelClass(model)
+    checkpoint_callback = ModelCheckpoint(every_n_epochs=100, dirpath=args.output_dir, filename='model_epoch_{epoch:02d}', save_last=True)
+    trainer = pl.Trainer(accelerator="gpu", min_epochs=args.num_train_epochs, devices=-1, auto_select_gpus=True, accumulate_grad_batches=args.gradient_accumulation_steps, strategy="deepspeed_stage_2", callbacks=[checkpoint_callback])
+    trainer.fit(model=plmodel, train_dataloaders=train_dataloader)
 
-        if epoch % 50 == 0 and epoch > 0:
-            print("SAVING INTERMEDIATE MODEL")
-            os.mkdir(args.output_dir + "_model_epoch_" + str(epoch).zfill(3))
-            model.save_pretrained(
-                args.output_dir + "_model_epoch_" + str(epoch).zfill(3)
-            )
-            tokenizer.save_pretrained(
-                args.output_dir + "_model_epoch_" + str(epoch).zfill(3)
-            )
 
     os.mkdir(args.output_dir + "/final_model/")
     model.save_pretrained(args.output_dir + "/final_model/")
     tokenizer.save_pretrained(args.output_dir + "/final_model/")
 
 
-# define the LightningModule
-class plModelClass(pl.LightningModule):
-    def __init__(self, model, args):
-        super().__init__()
-        self.model = model
-        self.args = args
-        self.learning_rate = args.learning_rate
+    # define the LightningModule
+    class plModelClass(pl.LightningModule):
+        def __init__(self, model):
+            super().__init__()
+            self.model = model
+            self.learning_rate = args.learning_rate
 
-    def training_step(self, batch, batch_idx):
-        # training_step defines the train loop.
-        # it is independent of forward
-        outputs = self.model(**batch)
-        loss = outputs.loss
-        # Logging to TensorBoard by default
-        # self.log("train_loss", loss)
-        return loss
+        def training_step(self, batch, batch_idx):
+            # training_step defines the train loop.
+            # it is independent of forward
+            outputs = self.model(**batch)
+            loss = outputs.loss
+            # Logging to TensorBoard by default
+            self.log("train_loss", loss)
+            return loss
 
-    def configure_optimizers(self):
-        no_decay = ["bias", "LayerNorm.weight"]
-        optimizer_grouped_parameters = [
-            {
-                "params": [
-                    p
-                    for n, p in self.model.named_parameters()
-                    if not any(nd in n for nd in no_decay)
-                ],
-                "weight_decay": self.args.weight_decay,
-            },
-            {
-                "params": [
-                    p
-                    for n, p in self.model.named_parameters()
-                    if any(nd in n for nd in no_decay)
-                ],
-                "weight_decay": 0.0,
-            },
-        ]
-        optimizer = AdamW(optimizer_grouped_parameters, lr=self.learning_rate)
+        def configure_optimizers(self):
+            no_decay = ["bias", "LayerNorm.weight"]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [
+                        p
+                        for n, p in self.model.named_parameters()
+                        if not any(nd in n for nd in no_decay)
+                    ],
+                    "weight_decay": args.weight_decay,
+                },
+                {
+                    "params": [
+                        p
+                        for n, p in self.model.named_parameters()
+                        if any(nd in n for nd in no_decay)
+                    ],
+                    "weight_decay": 0.0,
+                },
+            ]
+            optimizer = AdamW(optimizer_grouped_parameters, lr=self.learning_rate)
 
-        return optimizer
+            return optimizer
 
 
 if __name__ == "__main__":
