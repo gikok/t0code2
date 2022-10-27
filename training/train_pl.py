@@ -41,16 +41,15 @@ import torch
 from datasets import load_dataset, load_metric
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
+from torch.optim import AdamW
 
 import transformers
-from accelerate import Accelerator
 from transformers import (
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
     PreTrainedTokenizerBase,
     default_data_collator,
     DataCollatorForSeq2Seq,
-    AdamW,
     SchedulerType,
     get_scheduler,
     set_seed,
@@ -341,51 +340,43 @@ def main():
     args = parse_args()
     set_seed(args.seed)
 
-    # Initialize the accelerator. We will let the accelerator handle device placement for us.
-    accelerator = Accelerator()
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
-    logger.info(accelerator.state)
 
     # Setup logging, we only want one process per machine to log things on the screen.
     # accelerator.is_local_main_process is only True for one process per machine.
-    logger.setLevel(
-        logging.INFO if accelerator.is_local_main_process else logging.ERROR
-    )
-    if accelerator.is_local_main_process:
-        datasets.utils.logging.set_verbosity_warning()
-        transformers.utils.logging.set_verbosity_info()
-    else:
-        datasets.utils.logging.set_verbosity_error()
-        transformers.utils.logging.set_verbosity_error()
+
+    datasets.utils.logging.set_verbosity_error()
+    transformers.utils.logging.set_verbosity_error()
 
     # Handle the output directory creation
-    if accelerator.is_main_process:
-        os.makedirs(args.output_dir, exist_ok=True)
-    accelerator.wait_for_everyone()
+    os.makedirs(args.output_dir, exist_ok=True)
 
     # In distributed evaluation, the load_dataset function guarantee that only one local process can concurrently
     # download the dataset.
     if args.dataset_name is not None:
-        data_files = {"train": args.dataset_name, "test": args.eval_name}
-        raw_train_dataset = load_dataset("data", data_files=data_files, split="train")
+        # data_files = {"train": , "test": args.eval_name}
+        raw_train_dataset = load_dataset(
+            "data", data_files=args.dataset_name, split="train"
+        )
         # raw_test_dataset = load_dataset("data", data_files=data_files, split="test")
-        raw_eval_dataset = load_dataset("data", data_files=data_files, split="test")
+        # raw_eval_dataset = load_dataset("data", data_files=data_files, split="test")
     else:
         raise ValueError("Please specify `args.dataset_name`.")
 
-    column_names = raw_eval_dataset.column_names
+    # column_names = raw_eval_dataset.column_names
 
     # Load pretrained model and tokenizer
     model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name_or_path)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
 
     # # # get all item_no and add as tokens
-    items = pd.read_parquet("data/item_no_100.parquet.gzip")["item_no"].values.tolist()
+    items = pd.read_parquet("data/seven_names.parquet.gzip")["item_no"].values.tolist()
+    items += ["item_no"]
     tokenizer.add_tokens(items)
 
     # then resize embeddings
@@ -396,7 +387,7 @@ def main():
 
         new_tensor = list(model.named_parameters())[layer][1].detach().cpu()
 
-        for i in range(len(new_tensor[-1,:])):
+        for i in range(len(new_tensor[-1, :])):
             val, bin = np.histogram(new_tensor[:-n_new, i], 10000)
             pdf = val / sum(val)
             cdf = np.cumsum(pdf)
@@ -480,43 +471,44 @@ def main():
 
         return features
 
-    with accelerator.main_process_first():
-        train_dataset = raw_train_dataset.map(tokenize_train, batched=True)
-        train_dataset.set_format(
-            type="torch", columns=["input_ids", "attention_mask", "labels"]
-        )
-        test_dataset = raw_train_dataset.map(tokenize_train, batched=True)
-        test_dataset.set_format(
-            type="torch", columns=["input_ids", "attention_mask", "labels"]
-        )
-        #    train_dataset.save_to_disk("data/tokenized")
+    train_dataset = raw_train_dataset.map(tokenize_train, batched=True)
+    train_dataset.set_format(
+        type="torch", columns=["input_ids", "attention_mask", "labels"]
+    )
+    # test_dataset = raw_train_dataset.map(tokenize_train, batched=True)
+    # test_dataset.set_format(
+    #     type="torch", columns=["input_ids", "attention_mask", "labels"]
+    # )
+    #    train_dataset.save_to_disk("data/tokenized")
 
     # DataLoaders creation:
     train_collator = DataCollatorForSeq2Seq(
         tokenizer,
         model=model,
         label_pad_token_id=-100,
-        pad_to_multiple_of=8 if accelerator.use_fp16 else None,
+        pad_to_multiple_of=8,
     )
     train_dataloader = DataLoader(
         train_dataset,
-        shuffle=False,
+        shuffle=True,
+        persistent_workers=True,
         collate_fn=train_collator,
+        num_workers=1,
         batch_size=args.per_device_train_batch_size,
     )
 
-    test_collator = DataCollatorForSeq2Seq(
-        tokenizer,
-        model=model,
-        label_pad_token_id=-100,
-        pad_to_multiple_of=8 if accelerator.use_fp16 else None,
-    )
-    test_dataloader = DataLoader(
-        test_dataset,
-        shuffle=False,
-        collate_fn=test_collator,
-        batch_size=args.per_device_train_batch_size,
-    )
+    # test_collator = DataCollatorForSeq2Seq(
+    #     tokenizer,
+    #     model=model,
+    #     label_pad_token_id=-100,
+    #     pad_to_multiple_of=8,
+    # )
+    # test_dataloader = DataLoader(
+    #     test_dataset,
+    #     shuffle=False,
+    #     collate_fn=test_collator,
+    #     batch_size=args.per_device_train_batch_size,
+    # )
 
     # Scheduler and math around the number of training steps.
     num_update_steps_per_epoch = math.ceil(
@@ -529,23 +521,8 @@ def main():
             args.max_train_steps / num_update_steps_per_epoch
         )
 
-    if args.parallelize:
-        num_gpus = torch.cuda.device_count()
-        assert num_gpus > 1, "You need at least 2 GPUs to use `model.parallelize()`."
-        model.parallelize()
-        (
-            train_dataloader,
-            test_dataloader,
-        ) = accelerator.prepare(train_dataloader, test_dataloader)
-    else:
-        model, train_dataloader, test_dataloader = accelerator.prepare(
-            model, train_dataloader, test_dataloader
-        )
-
     total_batch_size = (
-        args.per_device_train_batch_size
-        * (accelerator.num_processes)
-        * args.gradient_accumulation_steps
+        args.per_device_train_batch_size * args.gradient_accumulation_steps
     )
     logger.info("***** Running training *****")
     logger.info(f"  Num training = {len(train_dataset)}")
@@ -559,7 +536,6 @@ def main():
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
 
-
     if args.gradient_checkpoint:
         model.gradient_checkpointing_enable()
 
@@ -570,59 +546,69 @@ def main():
             if name.startswith("shared") or name.startswith("lm_head"):
                 grad_mask = torch.ones_like(param)
                 grad_mask[: (len(tokenizer) - len(items)), :] = 0
-                param.register_hook(lambda grad: grad * grad_mask)
+                param.register_hook(
+                    lambda grad: grad * grad_mask.to(f"cuda:{grad.get_device()}")
+                )
 
     # train model using pytorch-lightning API
-    plmodel = plModelClass(model)
-    checkpoint_callback = ModelCheckpoint(every_n_epochs=100, dirpath=args.output_dir, filename='model_epoch_{epoch:02d}', save_last=True)
-    trainer = pl.Trainer(accelerator="gpu", min_epochs=args.num_train_epochs, devices=-1, auto_select_gpus=True, accumulate_grad_batches=args.gradient_accumulation_steps, strategy="deepspeed_stage_2", callbacks=[checkpoint_callback])
-    trainer.fit(model=plmodel, train_dataloaders=train_dataloader)
-
-
-    os.mkdir(args.output_dir + "/final_model/")
+    plmodel = plModelClass(model, args)
+    checkpoint_callback = ModelCheckpoint(
+        every_n_epochs=5,
+        dirpath=args.output_dir,
+        filename="model_epoch_{epoch:02d}",
+        save_last=True,
+    )
+    trainer = pl.Trainer(
+        logger=True,
+        accelerator="gpu",
+        min_epochs=args.num_train_epochs,
+        max_epochs=2 * args.num_train_epochs,
+        devices=-1,
+        auto_select_gpus=True,
+        accumulate_grad_batches=args.gradient_accumulation_steps,
+        strategy="deepspeed_stage_2",
+        callbacks=[checkpoint_callback],
+    )
+    trainer.fit(
+        model=plmodel,
+        train_dataloaders=train_dataloader,
+        # ckpt_path=args.output_dir[:-1] + "/model_epoch=999.ckpt",
+    )
+    if not os.path.exists(args.output_dir + "/final_model/"):
+        os.mkdir(args.output_dir + "/final_model/")
     model.save_pretrained(args.output_dir + "/final_model/")
     tokenizer.save_pretrained(args.output_dir + "/final_model/")
 
 
-    # define the LightningModule
-    class plModelClass(pl.LightningModule):
-        def __init__(self, model):
-            super().__init__()
-            self.model = model
-            self.learning_rate = args.learning_rate
+# define the LightningModule
+class plModelClass(pl.LightningModule):
+    def __init__(self, model, args):
+        super().__init__()
+        self.model = model
+        self.args = args
+        self.learning_rate = args.learning_rate
 
-        def training_step(self, batch, batch_idx):
-            # training_step defines the train loop.
-            # it is independent of forward
-            outputs = self.model(**batch)
-            loss = outputs.loss
-            # Logging to TensorBoard by default
-            self.log("train_loss", loss)
-            return loss
+    def training_step(self, batch, batch_idx):
+        # training_step defines the train loop.
+        # it is independent of forward
+        outputs = self.model(**batch)
+        loss = outputs.loss
+        # Logging to TensorBoard by default
+        self.log("train_loss", loss)
+        return loss
 
-        def configure_optimizers(self):
-            no_decay = ["bias", "LayerNorm.weight"]
-            optimizer_grouped_parameters = [
-                {
-                    "params": [
-                        p
-                        for n, p in self.model.named_parameters()
-                        if not any(nd in n for nd in no_decay)
-                    ],
-                    "weight_decay": args.weight_decay,
-                },
-                {
-                    "params": [
-                        p
-                        for n, p in self.model.named_parameters()
-                        if any(nd in n for nd in no_decay)
-                    ],
-                    "weight_decay": 0.0,
-                },
-            ]
-            optimizer = AdamW(optimizer_grouped_parameters, lr=self.learning_rate)
+    def configure_optimizers(self):
 
-            return optimizer
+        optimizer = AdamW(
+            [
+                list(self.model.named_parameters())[0][1],
+                list(self.model.named_parameters())[-1][1],
+            ],
+            lr=self.learning_rate,
+            weight_decay=0,
+        )
+
+        return optimizer
 
 
 if __name__ == "__main__":
