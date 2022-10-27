@@ -588,13 +588,22 @@ class plModelClass(pl.LightningModule):
         self.args = args
         self.learning_rate = args.learning_rate
 
+        param_list = list(model.named_parameters())
+        self.emb = param_list[0][1]
+        self.lm = param_list[-1][1]
+
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop.
         # it is independent of forward
         outputs = self.model(**batch)
         loss = outputs.loss
+        # Calculate gradients
+        emb_grad = torch.quantile(abs(self.emb.grad[-101:-1]), 0.9)
+        lm_grad = torch.quantile(abs(self.lm.grad[-101:-1]), 0.9)
         # Logging to TensorBoard by default
-        self.log("train_loss", loss)
+        self.log_dict(
+            {"train_loss": loss, "emb_gradient": emb_grad, "lm_gradient": lm_grad}
+        )
         return loss
 
     def configure_optimizers(self):
