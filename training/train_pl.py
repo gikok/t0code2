@@ -87,7 +87,7 @@ def parse_args():
         required=False,
         help="Number of epochs between each checkpoint",
     )
-    
+
     parser.add_argument(
         "-o",
         "--output_dir",
@@ -275,7 +275,6 @@ def parse_args():
     return args
 
 
-
 def main():
     args = parse_args()
     set_seed(args.seed)
@@ -295,7 +294,6 @@ def main():
     else:
         raise ValueError("Please specify `args.dataset_name`.")
 
-
     # Load pretrained model and tokenizer
     model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name_or_path)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
@@ -309,8 +307,8 @@ def main():
     model.resize_token_embeddings(len(tokenizer))
 
     # fix initial values of new matrices
-    resample(model, 0, len(items))
-    resample(model, -1, len(items))
+    resample(model, tokenizer, items, 0, len(items), "targeted")
+    resample(model, tokenizer, items, -1, len(items), "targeted")
 
     # Preprocessing the datasets.
     train_dataset = clean_train(raw_train_dataset, tokenizer, args)
