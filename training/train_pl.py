@@ -26,19 +26,13 @@ import argparse
 from lib2to3.pgen2 import token
 import logging
 import os
-import random
 from dataclasses import dataclass
-from itertools import chain
-from typing import Optional, Union
 import pandas as pd
-import numpy as np
-import math
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-import datasets
 import torch
-from datasets import load_dataset, load_metric
+from datasets import load_dataset
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from torch.optim import AdamW
@@ -47,15 +41,12 @@ import transformers
 from transformers import (
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
-    PreTrainedTokenizerBase,
-    default_data_collator,
     DataCollatorForSeq2Seq,
     SchedulerType,
-    get_scheduler,
     set_seed,
 )
-from transformers.file_utils import PaddingStrategy
 
+from helpers.data_processing import resample, clean_train
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +68,26 @@ def parse_args():
         "--eval_name",
         type=str,
         default=None,
-        required=True,
+        required=False,
         help="The name of the dataset to use (via the datasets library).",
     )
+    parser.add_argument(
+        "-ckpt",
+        "--ckpt_directory",
+        type=str,
+        default=None,
+        required=False,
+        help="The name of checkpoint from which to resume the training.",
+    )
+    parser.add_argument(
+        "-cf",
+        "--ckpt_freq",
+        type=int,
+        default=1,
+        required=False,
+        help="Number of epochs between each checkpoint",
+    )
+    
     parser.add_argument(
         "-o",
         "--output_dir",
@@ -143,10 +151,10 @@ def parse_args():
         help="Total number of training epochs to perform.",
     )
     parser.add_argument(
-        "-fe",
-        "--freeze_encoder",
+        "-fm",
+        "--freeze_model",
         action="store_true",
-        help="If enabled the encoder layers will be excluded from model training.",
+        help="If enabled the encoder/decoder layers will be excluded from model training.",
     )
     parser.add_argument(
         "-gc",
@@ -267,91 +275,10 @@ def parse_args():
     return args
 
 
-@dataclass
-class DataCollatorForMultipleChoice:
-    """
-    Data collator that will dynamically pad the inputs for multiple choice received.
-
-    Args:
-        tokenizer (:class:`~transformers.PreTrainedTokenizer` or :class:`~transformers.PreTrainedTokenizerFast`):
-            The tokenizer used for encoding the data.
-        padding (:obj:`bool`, :obj:`str` or :class:`~transformers.file_utils.PaddingStrategy`, `optional`, defaults to :obj:`True`):
-            Select a strategy to pad the returned sequences (according to the model's padding side and padding index)
-            among:
-
-            * :obj:`True` or :obj:`'longest'`: Pad to the longest sequence in the batch (or no padding if only a single
-            sequence if provided).
-            * :obj:`'max_length'`: Pad to a maximum length specified with the argument :obj:`max_length` or to the
-            maximum acceptable input length for the model if that argument is not provided.
-            * :obj:`False` or :obj:`'do_not_pad'` (default): No padding (i.e., can output a batch with sequences of
-            different lengths).
-        max_length (:obj:`int`, `optional`):
-            Maximum length of the returned list and optionally padding length (see above).
-        pad_to_multiple_of (:obj:`int`, `optional`):
-            If set will pad the sequence to a multiple of the provided value.
-
-            This is especially useful to enable the use of Tensor Cores on NVIDIA hardware with compute capability >=
-            7.5 (Volta).
-            Note that it's very NOT recommended to use fp16 to do any time of inference with T0 as the predictions will vastly differ from the predictions using fp32.
-    """
-
-    tokenizer: PreTrainedTokenizerBase
-    padding: Union[bool, str, PaddingStrategy] = True
-    max_length: Optional[int] = None
-    pad_to_multiple_of: Optional[int] = None
-
-    def __call__(self, features):
-        num_choices = len(features[0]["input_ids"])
-        flattened_features = [
-            [
-                {k: v[i] for k, v in feature.items() if k != "targets"}
-                for i in range(num_choices)
-            ]
-            for feature in features
-        ]
-        flattened_features = list(chain(*flattened_features))
-
-        batch = self.tokenizer.pad(
-            flattened_features,
-            padding=self.padding,
-            max_length=self.max_length,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-        )
-
-        # Pad the labels because it's not padded automatically
-        max_label_length = max([len(elem["labels"]) for elem in flattened_features])
-        batch["labels"] = [
-            l + [self.tokenizer.pad_token_id] * (max_label_length - len(l))
-            for l in [elem["labels"] for elem in flattened_features]
-        ]
-        batch["labels_attention_mask"] = [
-            m + [0] * (max_label_length - len(m))
-            for m in [elem["labels_attention_mask"] for elem in flattened_features]
-        ]
-
-        # Convert to tensors
-        batch = {k: torch.tensor(v) for k, v in batch.items()}
-
-        batch["targets"] = torch.tensor([f.pop("targets") for f in features])
-        return batch
-
 
 def main():
     args = parse_args()
     set_seed(args.seed)
-
-    # Make one log on every process with the configuration for debugging.
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO,
-    )
-
-    # Setup logging, we only want one process per machine to log things on the screen.
-    # accelerator.is_local_main_process is only True for one process per machine.
-
-    datasets.utils.logging.set_verbosity_error()
-    transformers.utils.logging.set_verbosity_error()
 
     # Handle the output directory creation
     os.makedirs(args.output_dir, exist_ok=True)
@@ -368,7 +295,6 @@ def main():
     else:
         raise ValueError("Please specify `args.dataset_name`.")
 
-    # column_names = raw_eval_dataset.column_names
 
     # Load pretrained model and tokenizer
     model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name_or_path)
@@ -383,103 +309,11 @@ def main():
     model.resize_token_embeddings(len(tokenizer))
 
     # fix initial values of new matrices
-    def resample(model, layer, n_new):
-
-        new_tensor = list(model.named_parameters())[layer][1].detach().cpu()
-
-        for i in range(len(new_tensor[-1, :])):
-            val, bin = np.histogram(new_tensor[:-n_new, i], 10000)
-            pdf = val / sum(val)
-            cdf = np.cumsum(pdf)
-            b = (bin[1:] + bin[:-1]) / 2
-            new_tensor[-n_new:, i] = torch.tensor(
-                np.interp(np.random.random(n_new), cdf, b)
-            )
-        data = list(model.named_parameters())[layer][1].data
-        data[:, :] = new_tensor
-
     resample(model, 0, len(items))
     resample(model, -1, len(items))
 
     # Preprocessing the datasets.
-    # First we tokenize all the texts.
-    padding = "max_length" if args.pad_to_max_length else False
-
-    def tokenize_train(examples):
-        input_texts = examples["input"]
-        target_texts = examples["target"]
-
-        model_inputs = tokenizer(
-            input_texts,
-            padding=padding,
-            max_length=args.max_length,
-            truncation=True,
-            add_special_tokens=args.input_eos,
-        )
-
-        with tokenizer.as_target_tokenizer():
-            tokenized_targets = tokenizer(
-                target_texts,
-                padding=padding,
-                max_length=args.target_max_length,
-                truncation=True,
-                add_special_tokens=False,
-            )
-            model_inputs["labels"] = [
-                [(t if t != tokenizer.pad_token_id else -100) for t in targets]
-                for targets in tokenized_targets["input_ids"]
-            ]
-        return model_inputs
-
-    def preprocess_eval(examples):
-        input_texts = examples["input"]
-        target_texts = examples["target"]
-        answer_choices_texts = examples["options"]
-
-        tokenized_inputs = tokenizer(
-            input_texts,
-            padding=padding,
-            max_length=args.max_length,
-            truncation=True,
-            add_special_tokens=False,
-        )
-        tokenized_targets = [
-            tokenizer(
-                ans_choi,
-                padding=padding,
-                max_length=args.target_max_length,
-                truncation=True,
-            )
-            for ans_choi in answer_choices_texts
-        ]
-
-        features = {
-            k: [
-                [elem for _ in range(len(tokenized_targets[idx]["input_ids"]))]
-                for idx, elem in enumerate(v)
-            ]
-            for k, v in tokenized_inputs.items()
-        }
-        bs = len(examples[column_names[0]])
-        features["labels"] = [tokenized_targets[idx]["input_ids"] for idx in range(bs)]
-        features["labels_attention_mask"] = [
-            tokenized_targets[idx]["attention_mask"] for idx in range(bs)
-        ]
-        features["targets"] = [
-            answer_choices_texts[idx].index(t) for idx, t in enumerate(target_texts)
-        ]
-
-        return features
-
-    train_dataset = raw_train_dataset.map(tokenize_train, batched=True)
-    train_dataset.set_format(
-        type="torch", columns=["input_ids", "attention_mask", "labels"]
-    )
-    # test_dataset = raw_train_dataset.map(tokenize_train, batched=True)
-    # test_dataset.set_format(
-    #     type="torch", columns=["input_ids", "attention_mask", "labels"]
-    # )
-    #    train_dataset.save_to_disk("data/tokenized")
+    train_dataset = clean_train(raw_train_dataset, tokenizer, args)
 
     # DataLoaders creation:
     train_collator = DataCollatorForSeq2Seq(
@@ -497,49 +331,8 @@ def main():
         batch_size=args.per_device_train_batch_size,
     )
 
-    # test_collator = DataCollatorForSeq2Seq(
-    #     tokenizer,
-    #     model=model,
-    #     label_pad_token_id=-100,
-    #     pad_to_multiple_of=8,
-    # )
-    # test_dataloader = DataLoader(
-    #     test_dataset,
-    #     shuffle=False,
-    #     collate_fn=test_collator,
-    #     batch_size=args.per_device_train_batch_size,
-    # )
-
-    # Scheduler and math around the number of training steps.
-    num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / args.gradient_accumulation_steps
-    )
-    if args.max_train_steps is None:
-        args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
-    else:
-        args.num_train_epochs = math.ceil(
-            args.max_train_steps / num_update_steps_per_epoch
-        )
-
-    total_batch_size = (
-        args.per_device_train_batch_size * args.gradient_accumulation_steps
-    )
-    logger.info("***** Running training *****")
-    logger.info(f"  Num training = {len(train_dataset)}")
-    logger.info(f"  Num Epochs = {args.num_train_epochs}")
-    logger.info(
-        f"  Instantaneous batch size per device = {args.per_device_train_batch_size}"
-    )
-    logger.info(
-        f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
-    )
-    logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
-    logger.info(f"  Total optimization steps = {args.max_train_steps}")
-
-    if args.gradient_checkpoint:
-        model.gradient_checkpointing_enable()
-
-    if args.freeze_encoder:
+    # only train the new parts of the model, freeze non-vocab layers and put grad=0 for pre-existing tokens
+    if args.freeze_model:
         for name, param in model.named_parameters():
             if name.startswith("encoder") or name.startswith("decoder"):
                 param.requires_grad = False
@@ -553,7 +346,7 @@ def main():
     # train model using pytorch-lightning API
     plmodel = plModelClass(model, args)
     checkpoint_callback = ModelCheckpoint(
-        every_n_epochs=5,
+        every_n_epochs=args.ckpt_freq,
         dirpath=args.output_dir,
         filename="model_epoch_{epoch:02d}",
         save_last=True,
@@ -572,7 +365,7 @@ def main():
     trainer.fit(
         model=plmodel,
         train_dataloaders=train_dataloader,
-        # ckpt_path=args.output_dir[:-1] + "/model_epoch=999.ckpt",
+        ckpt_path=args.ckpt_directory,
     )
     if not os.path.exists(args.output_dir + "/final_model/"):
         os.mkdir(args.output_dir + "/final_model/")
